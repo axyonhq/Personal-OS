@@ -750,6 +750,7 @@ function migrateColdEmailDomains(
               return {
                 id: typeof box.id === 'string' && box.id ? box.id : uid('mbox'),
                 localPart,
+                password: typeof box.password === 'string' ? box.password : '',
                 createdAt:
                   typeof box.createdAt === 'string'
                     ? box.createdAt
@@ -2726,6 +2727,7 @@ export function useStore() {
             additions.push({
               id: uid('mbox'),
               localPart,
+              password: '',
               createdAt: now,
             })
           }
@@ -2733,6 +2735,39 @@ export function useStore() {
           return {
             ...row,
             mailboxes: [...row.mailboxes, ...additions],
+            updatedAt: now,
+          }
+        }),
+      }))
+    },
+    [update],
+  )
+
+  const updateColdEmailMailbox = useCallback(
+    (
+      domainId: string,
+      mailboxId: string,
+      patch: Partial<{ localPart: string; password: string }>,
+    ) => {
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
+          if (row.id !== domainId) return row
+          return {
+            ...row,
+            mailboxes: row.mailboxes.map((box) => {
+              if (box.id !== mailboxId) return box
+              const nextLocal =
+                patch.localPart !== undefined
+                  ? normalizeMailboxLocalPart(patch.localPart) || box.localPart
+                  : box.localPart
+              return {
+                ...box,
+                localPart: nextLocal,
+                password: patch.password !== undefined ? patch.password : box.password,
+              }
+            }),
             updatedAt: now,
           }
         }),
@@ -3193,6 +3228,7 @@ export function useStore() {
     updateColdEmailDomain,
     removeColdEmailDomain,
     addColdEmailMailboxes,
+    updateColdEmailMailbox,
     removeColdEmailMailbox,
     addCompanyDecision,
     updateCompanyDecision,

@@ -130,6 +130,104 @@ function ProviderSelect({
   )
 }
 
+function MailboxPasswordCell({
+  value,
+  onSave,
+}: {
+  value: string
+  onSave: (next: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (!editing) setDraft(value)
+  }, [value, editing])
+
+  if (editing) {
+    return (
+      <span className="cold-email-password-edit">
+        <input
+          type={visible ? 'text' : 'password'}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label="Mailbox password"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onSave(draft)
+              setEditing(false)
+            }
+            if (e.key === 'Escape') {
+              setDraft(value)
+              setEditing(false)
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="ghost-btn compact"
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? 'Hide' : 'Show'}
+        </button>
+        <button
+          type="button"
+          className="btn-primary compact"
+          onClick={() => {
+            onSave(draft)
+            setEditing(false)
+          }}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="ghost-btn compact"
+          onClick={() => {
+            setDraft(value)
+            setEditing(false)
+          }}
+        >
+          Cancel
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <span className="cold-email-password-cell">
+      {value ? (
+        <code className="company-login-secret">{visible ? value : '••••••••'}</code>
+      ) : (
+        <span className="company-login-empty">—</span>
+      )}
+      {value ? (
+        <button
+          type="button"
+          className="ghost-btn compact"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+        >
+          {visible ? 'Hide' : 'Show'}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="ghost-btn compact"
+        onClick={() => {
+          setDraft(value)
+          setEditing(true)
+        }}
+      >
+        {value ? 'Edit' : 'Set'}
+      </button>
+    </span>
+  )
+}
+
 export function ColdEmailView({ store }: { store: Store }) {
   const domains = store.state.coldEmailDomains ?? []
   const [domainDraft, setDomainDraft] = useState('')
@@ -256,28 +354,56 @@ export function ColdEmailView({ store }: { store: Store }) {
                     )}
 
                     {domain.mailboxes.length > 0 && (
-                      <ul className="cold-email-mailbox-list">
-                        {domain.mailboxes.map((box) => (
-                          <li key={box.id} className="cold-email-mailbox">
-                            <code>
-                              {box.localPart}@{domain.domain}
-                            </code>
-                            <button
-                              type="button"
-                              className="ghost-btn compact"
-                              onClick={() =>
-                                setPendingMailboxDelete({
-                                  domainId: domain.id,
-                                  mailboxId: box.id,
-                                  label: `${box.localPart}@${domain.domain}`,
-                                })
-                              }
-                            >
-                              Remove
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="cold-email-mailbox-table-wrap">
+                        <table className="cold-email-mailbox-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">Email</th>
+                              <th scope="col">Password</th>
+                              <th scope="col">
+                                <span className="sr-only">Actions</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {domain.mailboxes.map((box) => {
+                              const email = `${box.localPart}@${domain.domain}`
+                              return (
+                                <tr key={box.id}>
+                                  <td>
+                                    <code className="cold-email-mailbox-email">{email}</code>
+                                  </td>
+                                  <td>
+                                    <MailboxPasswordCell
+                                      value={box.password ?? ''}
+                                      onSave={(password) =>
+                                        store.updateColdEmailMailbox(domain.id, box.id, {
+                                          password,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="ghost-btn compact"
+                                      onClick={() =>
+                                        setPendingMailboxDelete({
+                                          domainId: domain.id,
+                                          mailboxId: box.id,
+                                          label: email,
+                                        })
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
 
                     {adding && (

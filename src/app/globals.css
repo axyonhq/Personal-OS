@@ -9924,30 +9924,70 @@ select:focus {
   font-size: 0.85rem;
 }
 
-.cold-email-mailbox-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.cold-email-mailbox-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.14);
 }
 
-.cold-email-mailbox {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0.55rem;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+.cold-email-mailbox-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 28rem;
 }
 
-.cold-email-mailbox code {
+.cold-email-mailbox-table th,
+.cold-email-mailbox-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.cold-email-mailbox-table th {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cold-email-mailbox-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.cold-email-mailbox-email {
   font-family: var(--font-mono);
   font-size: 0.875rem;
   color: var(--text);
+}
+
+.cold-email-password-cell,
+.cold-email-password-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.cold-email-password-edit input {
+  min-width: 8rem;
+  max-width: 14rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .cold-email-mailbox-capture {

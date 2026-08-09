@@ -665,6 +665,8 @@ export interface ColdEmailMailbox {
   id: string
   /** Local part only — no @domain (e.g. "nick", "team") */
   localPart: string
+  /** Login password for this mailbox */
+  password: string
   createdAt: string
 }
 
