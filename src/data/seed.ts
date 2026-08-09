@@ -252,6 +252,7 @@ export function createSeedState(): AppState {
     companyIdeas: [],
     companyLogins: [],
     companyDecisions: [],
+    coldEmailDomains: [],
     mentor: emptyMentorState(),
   }
 }

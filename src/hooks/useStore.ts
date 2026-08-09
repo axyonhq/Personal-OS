@@ -23,6 +23,9 @@ import type {
   CompanyDecisionOption,
   CompanyIdea,
   CompanyLogin,
+  ColdEmailDomain,
+  ColdEmailMailbox,
+  ColdEmailProvider,
   DailyBodyLog,
   DailyDeepWorkSplit,
   DeepWorkId,
@@ -667,6 +670,113 @@ function migrateCompanyDecisions(
     .filter((d): d is CompanyDecision => d != null)
 }
 
+function normalizeDomainHost(raw: string): string {
+  let value = raw.trim().toLowerCase()
+  if (!value) return ''
+  value = value.replace(/^https?:\/\//i, '')
+  value = value.split('/')[0] ?? ''
+  value = value.split('?')[0] ?? ''
+  value = value.replace(/^www\./, '')
+  value = value.replace(/\.$/, '')
+  // Strip trailing path leftovers / ports for host:port
+  const host = value.split(':')[0] ?? ''
+  if (!host || !host.includes('.')) return ''
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host)) {
+    return ''
+  }
+  return host
+}
+
+function parseDomainList(raw: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of raw.split(/[\s,;]+/)) {
+    const host = normalizeDomainHost(part)
+    if (!host || seen.has(host)) continue
+    seen.add(host)
+    out.push(host)
+  }
+  return out
+}
+
+function normalizeMailboxLocalPart(raw: string): string {
+  let value = raw.trim().toLowerCase()
+  if (!value) return ''
+  // Accept nick@, nick@domain.com, or nick
+  if (value.includes('@')) {
+    value = value.split('@')[0] ?? ''
+  }
+  value = value.replace(/^\.+|\.+$/g, '')
+  if (!value) return ''
+  if (!/^[a-z0-9]([a-z0-9._+-]*[a-z0-9])?$/i.test(value) && !/^[a-z0-9]$/i.test(value)) {
+    return ''
+  }
+  return value
+}
+
+function parseMailboxList(raw: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of raw.split(/[\s,;]+/)) {
+    const local = normalizeMailboxLocalPart(part)
+    if (!local || seen.has(local)) continue
+    seen.add(local)
+    out.push(local)
+  }
+  return out
+}
+
+function migrateColdEmailDomains(
+  raw: unknown,
+  fallback: ColdEmailDomain[],
+): ColdEmailDomain[] {
+  if (!Array.isArray(raw)) return fallback
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const d = item as Partial<ColdEmailDomain>
+      const domain = normalizeDomainHost(typeof d.domain === 'string' ? d.domain : '')
+      if (!domain) return null
+      const provider: ColdEmailProvider =
+        d.provider === 'google' ? 'google' : 'microsoft'
+      const mailboxes: ColdEmailMailbox[] = Array.isArray(d.mailboxes)
+        ? d.mailboxes
+            .map((box) => {
+              if (!box || typeof box !== 'object') return null
+              const localPart = normalizeMailboxLocalPart(
+                typeof box.localPart === 'string' ? box.localPart : '',
+              )
+              if (!localPart) return null
+              return {
+                id: typeof box.id === 'string' && box.id ? box.id : uid('mbox'),
+                localPart,
+                createdAt:
+                  typeof box.createdAt === 'string'
+                    ? box.createdAt
+                    : new Date().toISOString(),
+              } satisfies ColdEmailMailbox
+            })
+            .filter((b): b is ColdEmailMailbox => b != null)
+        : []
+      // Dedupe local parts
+      const seen = new Set<string>()
+      const uniqueMailboxes = mailboxes.filter((b) => {
+        if (seen.has(b.localPart)) return false
+        seen.add(b.localPart)
+        return true
+      })
+      return {
+        id: typeof d.id === 'string' && d.id ? d.id : uid('cedom'),
+        domain,
+        provider,
+        mailboxes: uniqueMailboxes,
+        createdAt: typeof d.createdAt === 'string' ? d.createdAt : new Date().toISOString(),
+        updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : new Date().toISOString(),
+      } satisfies ColdEmailDomain
+    })
+    .filter((d): d is ColdEmailDomain => d != null)
+}
+
 function queueKey(realm: FinanceRealm): 'personalQueue' | 'companyQueue' {
   return realm === 'personal' ? 'personalQueue' : 'companyQueue'
 }
@@ -820,6 +930,7 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           .filter((row): row is CompanyLogin => row != null)
       : seed.companyLogins,
     companyDecisions: migrateCompanyDecisions(parsed.companyDecisions, seed.companyDecisions),
+    coldEmailDomains: migrateColdEmailDomains(parsed.coldEmailDomains, seed.coldEmailDomains),
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
@@ -2284,6 +2395,7 @@ export function useStore() {
         companyIdeas: s.companyIdeas,
         companyLogins: s.companyLogins,
         companyDecisions: s.companyDecisions,
+        coldEmailDomains: s.coldEmailDomains,
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
@@ -2523,6 +2635,125 @@ export function useStore() {
       update((s) => ({
         ...s,
         companyLogins: (s.companyLogins ?? []).filter((login) => login.id !== id),
+      }))
+    },
+    [update],
+  )
+
+  const addColdEmailDomains = useCallback(
+    (raw: string, provider: ColdEmailProvider = 'microsoft') => {
+      const hosts = parseDomainList(raw)
+      if (hosts.length === 0) return
+      const now = new Date().toISOString()
+      update((s) => {
+        const existing = new Set(
+          (s.coldEmailDomains ?? []).map((d) => d.domain.toLowerCase()),
+        )
+        const additions: ColdEmailDomain[] = []
+        for (const host of hosts) {
+          if (existing.has(host)) continue
+          existing.add(host)
+          additions.push({
+            id: uid('cedom'),
+            domain: host,
+            provider,
+            mailboxes: [],
+            createdAt: now,
+            updatedAt: now,
+          })
+        }
+        if (additions.length === 0) return s
+        return {
+          ...s,
+          coldEmailDomains: [...additions, ...(s.coldEmailDomains ?? [])],
+        }
+      })
+    },
+    [update],
+  )
+
+  const updateColdEmailDomain = useCallback(
+    (id: string, patch: Partial<{ provider: ColdEmailProvider; domain: string }>) => {
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
+          if (row.id !== id) return row
+          const nextDomain =
+            patch.domain !== undefined
+              ? normalizeDomainHost(patch.domain) || row.domain
+              : row.domain
+          const nextProvider: ColdEmailProvider =
+            patch.provider === 'google' || patch.provider === 'microsoft'
+              ? patch.provider
+              : row.provider
+          return {
+            ...row,
+            domain: nextDomain,
+            provider: nextProvider,
+            updatedAt: now,
+          }
+        }),
+      }))
+    },
+    [update],
+  )
+
+  const removeColdEmailDomain = useCallback(
+    (id: string) => {
+      update((s) => ({
+        ...s,
+        coldEmailDomains: (s.coldEmailDomains ?? []).filter((row) => row.id !== id),
+      }))
+    },
+    [update],
+  )
+
+  const addColdEmailMailboxes = useCallback(
+    (domainId: string, raw: string) => {
+      const locals = parseMailboxList(raw)
+      if (locals.length === 0) return
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
+          if (row.id !== domainId) return row
+          const existing = new Set(row.mailboxes.map((m) => m.localPart))
+          const additions: ColdEmailMailbox[] = []
+          for (const localPart of locals) {
+            if (existing.has(localPart)) continue
+            existing.add(localPart)
+            additions.push({
+              id: uid('mbox'),
+              localPart,
+              createdAt: now,
+            })
+          }
+          if (additions.length === 0) return row
+          return {
+            ...row,
+            mailboxes: [...row.mailboxes, ...additions],
+            updatedAt: now,
+          }
+        }),
+      }))
+    },
+    [update],
+  )
+
+  const removeColdEmailMailbox = useCallback(
+    (domainId: string, mailboxId: string) => {
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
+          if (row.id !== domainId) return row
+          return {
+            ...row,
+            mailboxes: row.mailboxes.filter((m) => m.id !== mailboxId),
+            updatedAt: now,
+          }
+        }),
       }))
     },
     [update],
@@ -2958,6 +3189,11 @@ export function useStore() {
     addCompanyLogin,
     updateCompanyLogin,
     removeCompanyLogin,
+    addColdEmailDomains,
+    updateColdEmailDomain,
+    removeColdEmailDomain,
+    addColdEmailMailboxes,
+    removeColdEmailMailbox,
     addCompanyDecision,
     updateCompanyDecision,
     addCompanyDecisionOption,

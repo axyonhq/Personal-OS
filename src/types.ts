@@ -593,6 +593,8 @@ export interface AppState {
   companyLogins: CompanyLogin[]
   /** Batcave Decision Gate — open loops & pending choices */
   companyDecisions: CompanyDecision[]
+  /** Batcave Cold Email — sending domains + mailboxes */
+  coldEmailDomains: ColdEmailDomain[]
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
 }
@@ -651,6 +653,28 @@ export interface CompanyDecision {
   options: CompanyDecisionOption[]
   status: CompanyDecisionStatus
   chosenOptionId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Mailbox provider for a cold-email sending domain */
+export type ColdEmailProvider = 'microsoft' | 'google'
+
+/** Local-part mailbox under a cold-email domain (e.g. nick → nick@domain.com) */
+export interface ColdEmailMailbox {
+  id: string
+  /** Local part only — no @domain (e.g. "nick", "team") */
+  localPart: string
+  createdAt: string
+}
+
+/** Sending domain + provider + linked mailboxes */
+export interface ColdEmailDomain {
+  id: string
+  /** Hostname only (e.g. axyonhq.com) */
+  domain: string
+  provider: ColdEmailProvider
+  mailboxes: ColdEmailMailbox[]
   createdAt: string
   updatedAt: string
 }
