@@ -111,7 +111,7 @@ export function MentorView({ store }: { store: Store }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context: buildMentorContext(store.state) }),
       })
-      const data = (await res.json()) as {
+      let data: {
         insight?: {
           summary: string
           weapons: string[]
@@ -122,6 +122,15 @@ export function MentorView({ store }: { store: Store }) {
         }
         error?: string
         raw?: string
+      } = {}
+      try {
+        data = (await res.json()) as typeof data
+      } catch {
+        throw new Error(
+          res.ok
+            ? 'Synthesis returned an unreadable response'
+            : `Synthesis failed (HTTP ${res.status})`,
+        )
       }
       if (!res.ok || !data.insight) {
         const detail = data.raw?.trim()
@@ -130,15 +139,21 @@ export function MentorView({ store }: { store: Store }) {
         throw new Error(detail || 'Synthesis failed')
       }
 
+      const weapons = Array.isArray(data.insight.weapons) ? data.insight.weapons : []
+      const drags = Array.isArray(data.insight.drags) ? data.insight.drags : []
+      const blindSpots = Array.isArray(data.insight.blindSpots) ? data.insight.blindSpots : []
+      const prescriptions = Array.isArray(data.insight.prescriptions)
+        ? data.insight.prescriptions
+        : []
+
       const saved = store.saveMentorInsight({
         summary: data.insight.summary,
-        weapons: data.insight.weapons,
-        drags: data.insight.drags,
-        blindSpots: data.insight.blindSpots,
-        prescriptions: data.insight.prescriptions,
+        weapons,
+        drags,
+        blindSpots,
+        prescriptions,
       })
-      const openCount =
-        data.insight.blindSpots.length + data.insight.prescriptions.length
+      const openCount = blindSpots.length + prescriptions.length
       store.appendMentorMessage({
         role: 'mentor',
         text: data.insight.chatReply || saved.summary,
@@ -146,10 +161,10 @@ export function MentorView({ store }: { store: Store }) {
       if (openCount > 0) {
         store.appendMentorMessage({
           role: 'system',
-          text: `Filed ${data.insight.blindSpots.length} blind spot${
-            data.insight.blindSpots.length === 1 ? '' : 's'
-          } and ${data.insight.prescriptions.length} prescription${
-            data.insight.prescriptions.length === 1 ? '' : 's'
+          text: `Filed ${blindSpots.length} blind spot${
+            blindSpots.length === 1 ? '' : 's'
+          } and ${prescriptions.length} prescription${
+            prescriptions.length === 1 ? '' : 's'
           } on the accountability board. Mark them actioned when you actually install them.`,
         })
       }

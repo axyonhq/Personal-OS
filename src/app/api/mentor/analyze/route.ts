@@ -5,74 +5,15 @@ import {
   mentorNotConfiguredResponse,
 } from '@/lib/mentor/anthropic'
 import { ANALYZE_JSON_INSTRUCTION, MENTOR_SYSTEM_PROMPT } from '@/lib/mentor/context'
-import { parseJsonRecord } from '@/lib/mentor/parseJson'
+import { insightFromMessageContent } from '@/lib/mentor/synthesis'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
 
-type MentorInsightPayload = {
-  summary: string
-  weapons: string[]
-  drags: string[]
-  blindSpots: string[]
-  prescriptions: string[]
-  chatReply: string
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .filter((v): v is string => typeof v === 'string')
-    .map((v) => v.trim())
-    .filter(Boolean)
-    .slice(0, 12)
-}
-
-function normalizeInsight(parsed: Record<string, unknown>, fallbackText = ''): MentorInsightPayload | null {
-  const summary =
-    (typeof parsed.summary === 'string' && parsed.summary.trim()) ||
-    (typeof parsed.read === 'string' && parsed.read.trim()) ||
-    (typeof parsed.analysis === 'string' && parsed.analysis.trim()) ||
-    fallbackText.trim()
-  if (!summary) return null
-
-  return {
-    summary,
-    weapons: asStringArray(parsed.weapons ?? parsed.strengths),
-    drags: asStringArray(parsed.drags ?? parsed.leaks ?? parsed.weaknesses),
-    blindSpots: asStringArray(parsed.blindSpots ?? parsed.blind_spots),
-    prescriptions: asStringArray(parsed.prescriptions ?? parsed.actions ?? parsed.recommendations),
-    chatReply:
-      typeof parsed.chatReply === 'string' && parsed.chatReply.trim()
-        ? parsed.chatReply.trim()
-        : typeof parsed.chat_reply === 'string' && parsed.chat_reply.trim()
-          ? parsed.chat_reply.trim()
-          : summary,
-  }
-}
-
-function parseInsightJson(raw: string): MentorInsightPayload | null {
-  const parsed = parseJsonRecord(raw)
-  if (parsed) return normalizeInsight(parsed)
-
-  // Last resort: model returned prose — still surface a usable synthesis
-  const prose = raw.trim()
-  if (prose.length >= 40) {
-    return {
-      summary: prose.slice(0, 1200),
-      weapons: [],
-      drags: [],
-      blindSpots: [],
-      prescriptions: [],
-      chatReply: prose.slice(0, 800),
-    }
-  }
-  return null
-}
-
 const SYNTHESIS_TOOL = {
   name: 'submit_mentor_synthesis',
   description: 'Submit the structured mentor pattern synthesis for this operator.',
+  strict: true,
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -106,6 +47,7 @@ const SYNTHESIS_TOOL = {
       },
     },
     required: ['summary', 'weapons', 'drags', 'blindSpots', 'prescriptions', 'chatReply'],
+    additionalProperties: false,
   },
 }
 
@@ -120,42 +62,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Context required' }, { status: 400 })
     }
 
-    const response = await client.messages.create({
+    const createParams = {
       model: MENTOR_MODEL,
       max_tokens: 4096,
       system: `${MENTOR_SYSTEM_PROMPT}\n\n${ANALYZE_JSON_INSTRUCTION}`,
       tools: [SYNTHESIS_TOOL],
-      tool_choice: { type: 'tool', name: 'submit_mentor_synthesis' },
+      tool_choice: { type: 'tool' as const, name: 'submit_mentor_synthesis' },
       messages: [
         {
-          role: 'user',
+          role: 'user' as const,
           content: `Run a full pattern synthesis on this operator. Be specific. Cite times of day, session shapes, breaks, spend, journals, and debrief feelings when the data supports it.\n\n${context}`,
         },
       ],
-    })
-
-    const toolBlock = response.content.find(
-      (b): b is Extract<typeof b, { type: 'tool_use' }> =>
-        b.type === 'tool_use' && b.name === 'submit_mentor_synthesis',
-    )
-
-    let insight: MentorInsightPayload | null = null
-    if (toolBlock && toolBlock.input && typeof toolBlock.input === 'object') {
-      insight = normalizeInsight(toolBlock.input as Record<string, unknown>)
     }
 
-    if (!insight) {
-      const text = response.content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n')
-        .trim()
-      insight = parseInsightJson(text)
+    let response = await client.messages.create(createParams)
+
+    // Truncated tool JSON is useless — one retry with more room.
+    if (response.stop_reason === 'max_tokens') {
+      response = await client.messages.create({
+        ...createParams,
+        max_tokens: 8192,
+      })
     }
+
+    const insight = insightFromMessageContent(response.content)
 
     if (!insight) {
       const raw = response.content
-        .map((b) => (b.type === 'text' ? b.text : b.type === 'tool_use' ? JSON.stringify(b.input) : ''))
+        .map((b) =>
+          b.type === 'text'
+            ? b.text
+            : b.type === 'tool_use'
+              ? JSON.stringify(b.input)
+              : '',
+        )
         .join('\n')
         .trim()
       return NextResponse.json(
