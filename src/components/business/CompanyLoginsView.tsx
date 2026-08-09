@@ -106,7 +106,8 @@ export function CompanyLoginsView({ store }: { store: Store }) {
     <div className="layout-stack company-logins">
       <HudPanel label="Logins">
         <p className="finance-hint">
-          Platform links, usernames, and passwords. Passwords stay hidden until you show them.
+          AXYON vault for platform links, usernames, and passwords. Passwords stay hidden until you
+          show them.
         </p>
 
         <form className="company-logins-capture" onSubmit={submit}>
