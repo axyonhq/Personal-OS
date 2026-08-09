@@ -7,6 +7,7 @@ import { CompanyDocumentsView } from './components/business/CompanyDocumentsView
 import { CompanyIdeasView } from './components/business/CompanyIdeasView'
 import { CompanyLoginsView } from './components/business/CompanyLoginsView'
 import { CompanyTodosView } from './components/business/CompanyTodosView'
+import { ColdEmailView } from './components/business/ColdEmailView'
 import { AutopilotView } from './components/AutopilotView'
 import { CalendarView } from './components/CalendarView'
 import { DashboardView } from './components/DashboardView'
@@ -66,12 +67,12 @@ const BUSINESS_TABS: {
   { id: 'logins', label: 'Logins', shortLabel: 'Logins', mark: 'L', enabled: true },
   { id: 'decisions', label: 'Decision Gate', shortLabel: 'Decide', mark: 'G', enabled: true },
   { id: 'metaAds', label: 'Meta Ads', shortLabel: 'Ads', mark: 'A', enabled: false },
-  { id: 'coldEmail', label: 'Cold Email', shortLabel: 'Email', mark: 'E', enabled: false },
+  { id: 'coldEmail', label: 'Cold Email', shortLabel: 'Email', mark: 'E', enabled: true },
   { id: 'agents', label: 'Agents', shortLabel: 'Agents', mark: 'N', enabled: false },
 ]
 
 const BUSINESS_PRIMARY: BusinessTab[] = ['todos', 'finance', 'documents', 'ideas']
-const BUSINESS_MORE: BusinessTab[] = ['logins', 'decisions']
+const BUSINESS_MORE: BusinessTab[] = ['logins', 'decisions', 'coldEmail']
 
 function readLayer(): AppLayer {
   try {
@@ -100,7 +101,8 @@ function readBusinessTab(): BusinessTab {
       raw === 'documents' ||
       raw === 'ideas' ||
       raw === 'logins' ||
-      raw === 'decisions'
+      raw === 'decisions' ||
+      raw === 'coldEmail'
     ) {
       return raw
     }
@@ -238,9 +240,7 @@ export default function App() {
   }
 
   const enterBusiness = () => {
-    setBusinessTab((t) =>
-      t === 'metaAds' || t === 'coldEmail' || t === 'agents' ? 'todos' : t,
-    )
+    setBusinessTab((t) => (t === 'metaAds' || t === 'agents' ? 'todos' : t))
     setLayer('business')
   }
 
@@ -505,6 +505,7 @@ export default function App() {
               {businessTab === 'ideas' && <CompanyIdeasView store={store} />}
               {businessTab === 'logins' && <CompanyLoginsView store={store} />}
               {businessTab === 'decisions' && <CompanyDecisionGateView store={store} />}
+              {businessTab === 'coldEmail' && <ColdEmailView store={store} />}
             </>
           ) : (
             <>
@@ -569,7 +570,9 @@ export default function App() {
                             ? 'Open loops'
                             : t.id === 'logins'
                               ? 'Credentials'
-                              : t.shortLabel}
+                              : t.id === 'coldEmail'
+                                ? 'Domains & mailboxes'
+                                : t.shortLabel}
                         </em>
                       </span>
                     </button>

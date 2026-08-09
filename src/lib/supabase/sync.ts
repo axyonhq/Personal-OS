@@ -129,6 +129,8 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     (state.companyIdeas?.length || 0) * 3 +
     (state.companyLogins?.length || 0) * 4 +
     (state.companyDecisions?.length || 0) * 4 +
+    (state.coldEmailDomains?.length || 0) * 4 +
+    (state.coldEmailDomains?.reduce((n, d) => n + (d.mailboxes?.length || 0), 0) || 0) * 2 +
     (state.mentor?.journalEntries?.length || 0) * 4 +
     (state.mentor?.messages?.length || 0) +
     (state.mentor?.latestInsight ? 6 : 0) +
