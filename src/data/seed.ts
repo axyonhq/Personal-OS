@@ -1,4 +1,12 @@
-import { emptyMentorState, type AppState, type Project, type ProjectId, type Task, type TimeEntry } from '../types'
+import {
+  emptyChiefOfStaffState,
+  emptyMentorState,
+  type AppState,
+  type Project,
+  type ProjectId,
+  type Task,
+  type TimeEntry,
+} from '../types'
 import { EMPTY_AUTOPILOT_COMPLETIONS } from '../types'
 import { emptyFinanceLedger } from '../utils/finance'
 import { parseDateKey, startOfWeekMonday, todayDateKey, todayMonthKey } from '../utils/time'
@@ -254,5 +262,6 @@ export function createSeedState(): AppState {
     companyDecisions: [],
     coldEmailDomains: [],
     mentor: emptyMentorState(),
+    chiefOfStaff: emptyChiefOfStaffState(),
   }
 }

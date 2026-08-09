@@ -15,7 +15,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 - **Two layers after login** — Command Center (personal) and AXYON (company), chosen from a gate screen
 - **Command Center** — dashboard, deep work, personal finances
-- **AXYON** — Command Deck, to-dos, decision gate, ideas, cold email, documents, logins, company finance (Revolut + buckets); Meta Ads / Agents marked soon
+- **AXYON** — Command Deck, to-dos, decision gate, ideas, cold email, documents, logins, company finance (Revolut + buckets); Meta Ads marked soon; **Agents → Chief of Staff** (platform-wide chat + morning/night briefs)
 - **Daily deep work target** — set hours/day, see hit/miss, streak, and week hit rate
 - **Today's One Thing** — single outcome to protect
 - **Project tasks** — brain-dump backlog; default view shows only today's tasks; toggle **Show all tasks** to promote/demote with Today/Later

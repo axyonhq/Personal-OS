@@ -134,6 +134,9 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     (state.mentor?.journalEntries?.length || 0) * 4 +
     (state.mentor?.messages?.length || 0) +
     (state.mentor?.latestInsight ? 6 : 0) +
+    (state.chiefOfStaff?.briefs?.length || 0) * 2 +
+    (state.chiefOfStaff?.messages?.length || 0) +
+    (state.chiefOfStaff?.latestInsight ? 6 : 0) +
     (state.timeEntries?.filter((e) => e.debrief).length || 0) * 3 +
     Object.keys(state.bodyLogs || {}).length * 2
   )
