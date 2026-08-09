@@ -7,6 +7,11 @@ import {
   buildChiefOfStaffContext,
   formatBriefCard,
 } from '../../lib/chiefOfStaff/context'
+import {
+  deliverBriefToSlack,
+  requestCosNotificationPermission,
+  showCosBrowserNotification,
+} from '../../lib/chiefOfStaff/deliverClient'
 import { listCompanyTasks } from '../../lib/supabase/companyTodos'
 import type { CoSBrief, CompanyTask } from '../../types'
 import { todayDateKey, nowMinutesInAppTz } from '../../utils/time'
@@ -32,6 +37,7 @@ export function ChiefOfStaffView({ store }: { store: Store }) {
   const [busy, setBusy] = useState<'chat' | 'scan' | 'brief' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tasks, setTasks] = useState<CompanyTask[]>([])
+  const [slackStatus, setSlackStatus] = useState<'unknown' | 'ready' | 'missing'>('unknown')
   const threadRef = useRef<HTMLDivElement>(null)
 
   const refreshTasks = useCallback(async () => {
@@ -53,10 +59,58 @@ export function ChiefOfStaffView({ store }: { store: Store }) {
   }, [isLoaded, refreshTasks])
 
   useEffect(() => {
+    requestCosNotificationPermission()
+  }, [])
+
+  useEffect(() => {
     const el = threadRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [cos.messages, busy])
+
+  useEffect(() => {
+    void fetch('/api/chief-of-staff/notify-slack')
+      .then((r) => r.json())
+      .then((d: { configured?: boolean }) => {
+        setSlackStatus(d.configured ? 'ready' : 'missing')
+      })
+      .catch(() => setSlackStatus('missing'))
+  }, [])
+
+  const pushBrief = async (payload: {
+    date: string
+    slot: 'morning' | 'night'
+    summary: string
+    actionItems: string[]
+    blindSpots: string[]
+    unmadeDecisions: string[]
+    chatReply?: string
+  }) => {
+    const saved = store.saveCoSBrief(payload)
+    showCosBrowserNotification(
+      `AXYON ${payload.slot === 'morning' ? 'Morning' : 'Night'} brief`,
+      saved.summary.slice(0, 140),
+    )
+    const slack = await deliverBriefToSlack(saved)
+    if (slack.ok) {
+      store.markCoSBriefSlackSent(saved.id)
+      store.appendCoSMessage({
+        role: 'system',
+        text: 'Brief also sent to Slack.',
+      })
+    } else if (!slack.skipped) {
+      store.appendCoSMessage({
+        role: 'system',
+        text: `Slack send failed: ${slack.error || 'unknown'}`,
+      })
+    } else {
+      store.appendCoSMessage({
+        role: 'system',
+        text: 'Slack not configured yet. Add SLACK_BOT_TOKEN + SLACK_COS_CHANNEL_ID (or webhook) in Vercel.',
+      })
+    }
+    return saved
+  }
 
   const context = useMemo(
     () => buildChiefOfStaffContext(store.state, { companyTasks: tasks }),
@@ -189,7 +243,7 @@ export function ChiefOfStaffView({ store }: { store: Store }) {
         error?: string
       }
       if (!res.ok || !data.brief) throw new Error(data.error || 'Brief failed')
-      store.saveCoSBrief({
+      await pushBrief({
         date,
         slot,
         summary: data.brief.summary,
@@ -230,8 +284,9 @@ export function ChiefOfStaffView({ store }: { store: Store }) {
           <h2 className="cos-hero-title">Your CoS scans the whole OS.</h2>
           <p className="cos-hero-sub">
             First principles. Simple words. Blind spots, stuck decisions, and the one move that
-            matters. Morning + night briefs on by default ({cos.morningHour}:00 / {cos.nightHour}
-            :00 Asia/Makassar).
+            matters. Briefs at {cos.morningHour}:00 and {cos.nightHour}:00 Asia/Makassar — in-app,
+            browser notify
+            {slackStatus === 'ready' ? ', and Slack' : slackStatus === 'missing' ? ' (Slack needs env keys)' : ''}.
           </p>
         </div>
         <div className="cos-hero-actions">

@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 
 const isPublicRoute = createRouteMatcher([
   '/api/revolut(.*)',
+  '/api/chief-of-staff/cron(.*)',
 ])
 
 export default clerkMiddleware(async (auth, request) => {
