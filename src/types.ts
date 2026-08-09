@@ -398,11 +398,12 @@ export function normalizeActiveTab(tab: unknown): AppTab {
   return 'dashboard'
 }
 
-/** Post-login layer: hub gate, personal OS, or company Batcave */
+/** Post-login layer: hub gate, personal OS, or company AXYON */
 export type AppLayer = 'gate' | 'personal' | 'business'
 
-/** Tabs inside the Batcave (company) layer */
+/** Tabs inside the AXYON (company) layer */
 export type BusinessTab =
+  | 'commandDeck'
   | 'todos'
   | 'finance'
   | 'documents'

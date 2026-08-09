@@ -43,7 +43,7 @@ export function CompanyIdeasView({ store }: { store: Store }) {
   return (
     <div className="layout-stack company-ideas">
       <HudPanel label="Ideas">
-        <p className="finance-hint">Brain dump. Title it, write it, get it out of your head.</p>
+        <p className="finance-hint">Capture sparks for AXYON. Title it, write it, clear your head.</p>
 
         <form className="company-ideas-capture" onSubmit={submit}>
           <div className="company-ideas-fields">
