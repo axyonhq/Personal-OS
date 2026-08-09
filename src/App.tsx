@@ -3,6 +3,8 @@
 import { UserButton } from '@clerk/nextjs'
 import { useCallback, useEffect, useState } from 'react'
 import { AxyonMark } from './components/brand/AxyonMark'
+import { ChiefOfStaffBriefHost } from './components/ChiefOfStaffBriefHost'
+import { ChiefOfStaffView } from './components/business/ChiefOfStaffView'
 import { ColdEmailView } from './components/business/ColdEmailView'
 import { CommandDeckView } from './components/business/CommandDeckView'
 import { CompanyDecisionGateView } from './components/business/CompanyDecisionGateView'
@@ -125,9 +127,9 @@ const BUSINESS_TABS: BusinessNavItem[] = [
     label: 'Agents',
     shortLabel: 'Agents',
     mark: 'N',
-    enabled: false,
+    enabled: true,
     group: 'machine',
-    sub: 'Coming soon',
+    sub: 'Chief of Staff',
   },
   {
     id: 'documents',
@@ -166,7 +168,7 @@ const BUSINESS_NAV_GROUPS: { id: BusinessNavItem['group']; label: string }[] = [
 ]
 
 const BUSINESS_PRIMARY: BusinessTab[] = ['commandDeck', 'todos', 'finance', 'ideas']
-const BUSINESS_MORE: BusinessTab[] = ['decisions', 'coldEmail', 'documents', 'logins']
+const BUSINESS_MORE: BusinessTab[] = ['decisions', 'coldEmail', 'documents', 'logins', 'agents']
 
 const BUSINESS_TAB_IDS = new Set<BusinessTab>(BUSINESS_TABS.map((t) => t.id))
 
@@ -344,7 +346,7 @@ export default function App() {
   }
 
   const enterBusiness = () => {
-    setBusinessTab((t) => (t === 'metaAds' || t === 'agents' ? 'commandDeck' : t))
+    setBusinessTab((t) => (t === 'metaAds' ? 'commandDeck' : t))
     setLayer('business')
   }
 
@@ -653,6 +655,7 @@ export default function App() {
               {businessTab === 'logins' && <CompanyLoginsView store={store} />}
               {businessTab === 'decisions' && <CompanyDecisionGateView store={store} />}
               {businessTab === 'coldEmail' && <ColdEmailView store={store} />}
+              {businessTab === 'agents' && <ChiefOfStaffView store={store} />}
             </>
           ) : (
             <>
@@ -775,6 +778,8 @@ export default function App() {
           </div>
         </ModalPortal>
       )}
+
+      <ChiefOfStaffBriefHost store={store} />
 
       <DeepWorkTimerHost
         store={store}

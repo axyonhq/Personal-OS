@@ -252,6 +252,78 @@ export function mentorChargeKey(kind: MentorChargeKind, text: string): string {
   return `${kind}:${text.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 140)}`
 }
 
+/** Chief of Staff chat roles */
+export type CoSChatRole = 'user' | 'cos' | 'system'
+
+export interface CoSMessage {
+  id: string
+  role: CoSChatRole
+  text: string
+  createdAt: string
+  /** Optional link to a proactive brief */
+  briefId?: string
+}
+
+export type CoSBriefSlot = 'morning' | 'night'
+
+export interface CoSBrief {
+  id: string
+  /** Calendar day in APP_TIMEZONE */
+  date: string
+  slot: CoSBriefSlot
+  summary: string
+  actionItems: string[]
+  blindSpots: string[]
+  unmadeDecisions: string[]
+  createdAt: string
+  readAt?: string
+}
+
+export interface CoSInsight {
+  id: string
+  createdAt: string
+  summary: string
+  patterns: string[]
+  blindSpots: string[]
+  unmadeDecisions: string[]
+  actionItems: string[]
+}
+
+export interface ChiefOfStaffState {
+  messages: CoSMessage[]
+  briefs: CoSBrief[]
+  latestInsight: CoSInsight | null
+  insightHistory: CoSInsight[]
+  /** Local hour (0-23) in APP_TIMEZONE when morning brief may fire */
+  morningHour: number
+  /** Local hour (0-23) in APP_TIMEZONE when night brief may fire */
+  nightHour: number
+  proactiveEnabled: boolean
+}
+
+export function emptyChiefOfStaffState(): ChiefOfStaffState {
+  return {
+    messages: [
+      {
+        id: 'cos-welcome',
+        role: 'system',
+        text: 'Chief of Staff online. I scan the whole platform — company and personal — for blind spots, stuck decisions, and the one move that matters. Ask me anything. I also brief you every morning and every night.',
+        createdAt: new Date(0).toISOString(),
+      },
+    ],
+    briefs: [],
+    latestInsight: null,
+    insightHistory: [],
+    morningHour: 7,
+    nightHour: 20,
+    proactiveEnabled: true,
+  }
+}
+
+export function cosBriefKey(date: string, slot: CoSBriefSlot): string {
+  return `${date}:${slot}`
+}
+
 /** Recurrence rule for a calendar block. */
 export interface BlockRepeat {
   /** Days of week the block repeats on: 0 = Sunday … 6 = Saturday. Daily = all 7. */
@@ -598,6 +670,8 @@ export interface AppState {
   coldEmailDomains: ColdEmailDomain[]
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
+  /** AXYON Chief of Staff — platform-wide briefs + chat */
+  chiefOfStaff: ChiefOfStaffState
 }
 
 export interface CompanyDocument {

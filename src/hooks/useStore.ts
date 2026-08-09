@@ -59,11 +59,17 @@ import type {
   VisionGoal,
   WeeklyGoal,
   WeeklyGoalsArchiveEntry,
+  ChiefOfStaffState,
+  CoSBrief,
+  CoSBriefSlot,
+  CoSInsight,
+  CoSMessage,
 } from '../types'
 import {
   DEEP_WORK_IDS,
   EMPTY_AUTOPILOT_COMPLETIONS,
   equalDeepWorkSplit,
+  emptyChiefOfStaffState,
   emptyMentorState,
   mentorChargeKey,
   normalizeActiveTab,
@@ -71,6 +77,7 @@ import {
   scaleDeepWorkSplit,
   SESSION_FEELINGS,
   SESSION_TAGS,
+  cosBriefKey,
 } from '../types'
 import { mergePersonalFoodAndDrink, migrateWishlist } from '../utils/finance'
 import {
@@ -341,6 +348,110 @@ function migrateMentorState(raw: unknown): MentorState {
     latestInsight,
     insightHistory,
     charges: charges.slice(0, 80),
+  }
+}
+
+function migrateChiefOfStaffState(raw: unknown): ChiefOfStaffState {
+  const empty = emptyChiefOfStaffState()
+  if (!raw || typeof raw !== 'object') return empty
+  const c = raw as Partial<ChiefOfStaffState>
+
+  const messages: CoSMessage[] = Array.isArray(c.messages)
+    ? c.messages
+        .map((msg): CoSMessage | null => {
+          if (!msg || typeof msg !== 'object') return null
+          const role = msg.role
+          if (role !== 'user' && role !== 'cos' && role !== 'system') return null
+          if (typeof msg.text !== 'string' || !msg.text.trim()) return null
+          const next: CoSMessage = {
+            id: typeof msg.id === 'string' && msg.id ? msg.id : uid('cosmsg'),
+            role,
+            text: msg.text,
+            createdAt:
+              typeof msg.createdAt === 'string' ? msg.createdAt : new Date().toISOString(),
+          }
+          if (typeof msg.briefId === 'string') next.briefId = msg.briefId
+          return next
+        })
+        .filter((m): m is CoSMessage => m != null)
+        .slice(-120)
+    : empty.messages
+
+  const briefs: CoSBrief[] = Array.isArray(c.briefs)
+    ? c.briefs
+        .map((b): CoSBrief | null => {
+          if (!b || typeof b !== 'object') return null
+          if (typeof b.date !== 'string' || (b.slot !== 'morning' && b.slot !== 'night')) return null
+          if (typeof b.summary !== 'string' || !b.summary.trim()) return null
+          const next: CoSBrief = {
+            id: typeof b.id === 'string' && b.id ? b.id : uid('brief'),
+            date: b.date,
+            slot: b.slot,
+            summary: b.summary,
+            actionItems: Array.isArray(b.actionItems)
+              ? b.actionItems.filter((x): x is string => typeof x === 'string')
+              : [],
+            blindSpots: Array.isArray(b.blindSpots)
+              ? b.blindSpots.filter((x): x is string => typeof x === 'string')
+              : [],
+            unmadeDecisions: Array.isArray(b.unmadeDecisions)
+              ? b.unmadeDecisions.filter((x): x is string => typeof x === 'string')
+              : [],
+            createdAt:
+              typeof b.createdAt === 'string' ? b.createdAt : new Date().toISOString(),
+          }
+          if (typeof b.readAt === 'string') next.readAt = b.readAt
+          return next
+        })
+        .filter((b): b is CoSBrief => b != null)
+        .slice(0, 60)
+    : []
+
+  const migrateInsight = (rawInsight: unknown): CoSInsight | null => {
+    if (!rawInsight || typeof rawInsight !== 'object') return null
+    const i = rawInsight as Partial<CoSInsight>
+    if (typeof i.summary !== 'string' || !i.summary.trim()) return null
+    return {
+      id: typeof i.id === 'string' && i.id ? i.id : uid('cosscan'),
+      createdAt: typeof i.createdAt === 'string' ? i.createdAt : new Date().toISOString(),
+      summary: i.summary,
+      patterns: Array.isArray(i.patterns)
+        ? i.patterns.filter((x): x is string => typeof x === 'string')
+        : [],
+      blindSpots: Array.isArray(i.blindSpots)
+        ? i.blindSpots.filter((x): x is string => typeof x === 'string')
+        : [],
+      unmadeDecisions: Array.isArray(i.unmadeDecisions)
+        ? i.unmadeDecisions.filter((x): x is string => typeof x === 'string')
+        : [],
+      actionItems: Array.isArray(i.actionItems)
+        ? i.actionItems.filter((x): x is string => typeof x === 'string')
+        : [],
+    }
+  }
+
+  const latestInsight = migrateInsight(c.latestInsight)
+  const insightHistory = Array.isArray(c.insightHistory)
+    ? c.insightHistory.map(migrateInsight).filter((x): x is CoSInsight => x != null).slice(0, 20)
+    : []
+
+  const morningHour =
+    typeof c.morningHour === 'number' && c.morningHour >= 0 && c.morningHour <= 23
+      ? Math.round(c.morningHour)
+      : 7
+  const nightHour =
+    typeof c.nightHour === 'number' && c.nightHour >= 0 && c.nightHour <= 23
+      ? Math.round(c.nightHour)
+      : 20
+
+  return {
+    messages: messages.length > 0 ? messages : empty.messages,
+    briefs,
+    latestInsight,
+    insightHistory,
+    morningHour,
+    nightHour,
+    proactiveEnabled: c.proactiveEnabled !== false,
   }
 }
 
@@ -935,6 +1046,7 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
+    chiefOfStaff: migrateChiefOfStaffState(parsed.chiefOfStaff),
   }
 }
 
@@ -2015,6 +2127,188 @@ export function useStore() {
     [resolveMentorCharge],
   )
 
+  const appendCoSMessage = useCallback(
+    (
+      message: Omit<CoSMessage, 'id' | 'createdAt'> & {
+        id?: string
+        createdAt?: string
+      },
+    ) => {
+      update((s) => {
+        const next: CoSMessage = {
+          id: message.id || uid('cosmsg'),
+          role: message.role,
+          text: message.text,
+          createdAt: message.createdAt || new Date().toISOString(),
+          briefId: message.briefId,
+        }
+        return {
+          ...s,
+          chiefOfStaff: {
+            ...s.chiefOfStaff,
+            messages: [...(s.chiefOfStaff?.messages || []), next].slice(-120),
+          },
+        }
+      })
+    },
+    [update],
+  )
+
+  const saveCoSBrief = useCallback(
+    (
+      input: Omit<CoSBrief, 'id' | 'createdAt'> & {
+        id?: string
+        createdAt?: string
+        chatReply?: string
+      },
+    ) => {
+      const now = input.createdAt || new Date().toISOString()
+      const id = input.id || uid('brief')
+      const brief: CoSBrief = {
+        id,
+        date: input.date,
+        slot: input.slot,
+        summary: input.summary,
+        actionItems: input.actionItems || [],
+        blindSpots: input.blindSpots || [],
+        unmadeDecisions: input.unmadeDecisions || [],
+        createdAt: now,
+        readAt: input.readAt,
+      }
+      update((s) => {
+        const cos = s.chiefOfStaff || emptyChiefOfStaffState()
+        const withoutDup = (cos.briefs || []).filter(
+          (b) => cosBriefKey(b.date, b.slot) !== cosBriefKey(brief.date, brief.slot),
+        )
+        const chatText =
+          input.chatReply?.trim() ||
+          [
+            `${brief.slot === 'morning' ? 'Morning' : 'Night'} brief · ${brief.date}`,
+            brief.summary,
+            '',
+            'Actions:',
+            ...brief.actionItems.map((a, i) => `${i + 1}. ${a}`),
+          ].join('\n')
+        return {
+          ...s,
+          chiefOfStaff: {
+            ...cos,
+            briefs: [brief, ...withoutDup].slice(0, 60),
+            messages: [
+              ...(cos.messages || []),
+              {
+                id: uid('cosmsg'),
+                role: 'cos' as const,
+                text: chatText,
+                createdAt: now,
+                briefId: id,
+              },
+            ].slice(-120),
+          },
+        }
+      })
+      return brief
+    },
+    [update],
+  )
+
+  const markCoSBriefRead = useCallback(
+    (id: string) => {
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        chiefOfStaff: {
+          ...s.chiefOfStaff,
+          briefs: (s.chiefOfStaff?.briefs || []).map((b) =>
+            b.id === id ? { ...b, readAt: b.readAt || now } : b,
+          ),
+        },
+      }))
+    },
+    [update],
+  )
+
+  const saveCoSInsight = useCallback(
+    (
+      insight: Omit<CoSInsight, 'id' | 'createdAt'> & {
+        id?: string
+        createdAt?: string
+        chatReply?: string
+      },
+    ) => {
+      const now = insight.createdAt || new Date().toISOString()
+      const next: CoSInsight = {
+        id: insight.id || uid('cosscan'),
+        createdAt: now,
+        summary: insight.summary,
+        patterns: insight.patterns || [],
+        blindSpots: insight.blindSpots || [],
+        unmadeDecisions: insight.unmadeDecisions || [],
+        actionItems: insight.actionItems || [],
+      }
+      update((s) => {
+        const cos = s.chiefOfStaff || emptyChiefOfStaffState()
+        return {
+          ...s,
+          chiefOfStaff: {
+            ...cos,
+            latestInsight: next,
+            insightHistory: [next, ...(cos.insightHistory || [])].slice(0, 20),
+            messages: insight.chatReply
+              ? [
+                  ...(cos.messages || []),
+                  {
+                    id: uid('cosmsg'),
+                    role: 'cos' as const,
+                    text: insight.chatReply,
+                    createdAt: now,
+                  },
+                ].slice(-120)
+              : cos.messages,
+          },
+        }
+      })
+      return next
+    },
+    [update],
+  )
+
+  const setCoSProactive = useCallback(
+    (enabled: boolean) => {
+      update((s) => ({
+        ...s,
+        chiefOfStaff: {
+          ...(s.chiefOfStaff || emptyChiefOfStaffState()),
+          proactiveEnabled: enabled,
+        },
+      }))
+    },
+    [update],
+  )
+
+  const setCoSBriefHours = useCallback(
+    (morningHour: number, nightHour: number) => {
+      update((s) => ({
+        ...s,
+        chiefOfStaff: {
+          ...(s.chiefOfStaff || emptyChiefOfStaffState()),
+          morningHour: Math.max(0, Math.min(23, Math.round(morningHour))),
+          nightHour: Math.max(0, Math.min(23, Math.round(nightHour))),
+        },
+      }))
+    },
+    [update],
+  )
+
+  const hasCoSBrief = useCallback(
+    (date: string, slot: CoSBriefSlot) => {
+      return (state.chiefOfStaff?.briefs || []).some(
+        (b) => cosBriefKey(b.date, b.slot) === cosBriefKey(date, slot),
+      )
+    },
+    [state.chiefOfStaff?.briefs],
+  )
+
   const discardTimer = useCallback(() => {
     update({ activeTimer: null })
   }, [update])
@@ -2400,6 +2694,7 @@ export function useStore() {
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
+        chiefOfStaff: s.chiefOfStaff,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       writeFinanceBackup(next.personalFinance, next.companyFinance)
@@ -3193,6 +3488,13 @@ export function useStore() {
     markPrescriptionInstalled,
     resolveMentorCharge,
     actionMentorCharge,
+    appendCoSMessage,
+    saveCoSBrief,
+    markCoSBriefRead,
+    saveCoSInsight,
+    setCoSProactive,
+    setCoSBriefHours,
+    hasCoSBrief,
     addCalendarBlock,
     updateCalendarBlock,
     removeCalendarBlock,
