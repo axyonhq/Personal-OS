@@ -1,13 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  getAnthropicClient,
-  MENTOR_MODEL,
-  mentorNotConfiguredResponse,
-} from '@/lib/mentor/anthropic'
 import { buildChiefOfStaffContext } from '@/lib/chiefOfStaff/context'
+import {
+  COS_OPENAI_MODEL,
+  getOpenAIClient,
+  openaiNotConfiguredResponse,
+  parseOpenAIToolArgs,
+} from '@/lib/chiefOfStaff/openai'
 import { COS_BRIEF_INSTRUCTION, COS_SYSTEM_PROMPT } from '@/lib/chiefOfStaff/prompts'
-import { briefFromMessageContent } from '@/lib/chiefOfStaff/synthesis'
+import { normalizeBrief } from '@/lib/chiefOfStaff/synthesis'
 import { postCosBriefToSlack, slackConfigured } from '@/lib/chiefOfStaff/slack'
 import type { AppState, CoSBrief, CoSBriefSlot, CompanyTask } from '@/types'
 import { cosBriefKey, emptyChiefOfStaffState } from '@/types'
@@ -18,20 +19,23 @@ export const runtime = 'nodejs'
 export const maxDuration = 120
 
 const BRIEF_TOOL = {
-  name: 'submit_cos_brief',
-  description: 'Submit a morning or night Chief of Staff brief.',
-  strict: true,
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      summary: { type: 'string' },
-      actionItems: { type: 'array', items: { type: 'string' } },
-      blindSpots: { type: 'array', items: { type: 'string' } },
-      unmadeDecisions: { type: 'array', items: { type: 'string' } },
-      chatReply: { type: 'string' },
+  type: 'function' as const,
+  function: {
+    name: 'submit_cos_brief',
+    description: 'Submit a morning or night Chief of Staff brief.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        actionItems: { type: 'array', items: { type: 'string' } },
+        blindSpots: { type: 'array', items: { type: 'string' } },
+        unmadeDecisions: { type: 'array', items: { type: 'string' } },
+        chatReply: { type: 'string' },
+      },
+      required: ['summary', 'actionItems', 'blindSpots', 'unmadeDecisions', 'chatReply'],
+      additionalProperties: false,
     },
-    required: ['summary', 'actionItems', 'blindSpots', 'unmadeDecisions', 'chatReply'],
-    additionalProperties: false,
   },
 }
 
@@ -165,8 +169,8 @@ async function runCron(req: NextRequest) {
     )
   }
 
-  const client = getAnthropicClient()
-  if (!client) return mentorNotConfiguredResponse()
+  const client = getOpenAIClient()
+  if (!client) return openaiNotConfiguredResponse()
 
   const owned = await loadOwnerState()
   if (!owned) {
@@ -195,25 +199,31 @@ async function runCron(req: NextRequest) {
   const companyTasks = await loadCompanyTasks(owned.userId)
   const context = buildChiefOfStaffContext(owned.state, { companyTasks })
 
-  const createParams = {
-    model: MENTOR_MODEL,
-    max_tokens: 4096,
-    system: `${COS_SYSTEM_PROMPT}\n\n${COS_BRIEF_INSTRUCTION}`,
+  const response = await client.chat.completions.create({
+    model: COS_OPENAI_MODEL,
+    max_completion_tokens: 4096,
     tools: [BRIEF_TOOL],
-    tool_choice: { type: 'tool' as const, name: 'submit_cos_brief' },
+    tool_choice: { type: 'function', function: { name: 'submit_cos_brief' } },
     messages: [
       {
-        role: 'user' as const,
+        role: 'system',
+        content: `${COS_SYSTEM_PROMPT}\n\n${COS_BRIEF_INSTRUCTION}`,
+      },
+      {
+        role: 'user',
         content: `Write the ${slot} brief for ${date}. First principles. 4th-grade reading level. Scan the whole platform.\n\n${context}`,
       },
     ],
-  }
+  })
 
-  let response = await client.messages.create(createParams)
-  if (response.stop_reason === 'max_tokens') {
-    response = await client.messages.create({ ...createParams, max_tokens: 8192 })
-  }
-  const parsed = briefFromMessageContent(response.content)
+  const toolCall = response.choices[0]?.message?.tool_calls?.find(
+    (t) => t.type === 'function' && t.function?.name === 'submit_cos_brief',
+  )
+  const args =
+    toolCall && toolCall.type === 'function'
+      ? parseOpenAIToolArgs(toolCall.function.arguments)
+      : null
+  const parsed = normalizeBrief(args)
   if (!parsed) {
     return NextResponse.json({ ok: false, error: 'Could not parse brief' }, { status: 502 })
   }

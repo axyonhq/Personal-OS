@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  getAnthropicClient,
-  MENTOR_MODEL,
-  mentorNotConfiguredResponse,
-} from '@/lib/mentor/anthropic'
+  COS_OPENAI_MODEL,
+  getOpenAIClient,
+  openaiNotConfiguredResponse,
+} from '@/lib/chiefOfStaff/openai'
 import { COS_SYSTEM_PROMPT } from '@/lib/chiefOfStaff/prompts'
 
 export const runtime = 'nodejs'
@@ -13,8 +13,8 @@ type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
 export async function POST(req: NextRequest) {
   try {
-    const client = getAnthropicClient()
-    if (!client) return mentorNotConfiguredResponse()
+    const client = getOpenAIClient()
+    if (!client) return openaiNotConfiguredResponse()
 
     const body = (await req.json()) as {
       message?: string
@@ -40,26 +40,25 @@ export async function POST(req: NextRequest) {
           .slice(-16)
       : []
 
-    const system = [
-      COS_SYSTEM_PROMPT,
-      '',
-      '--- LIVE PLATFORM DOSSIER ---',
-      context || '(dossier empty)',
-    ].join('\n')
-
-    const response = await client.messages.create({
-      model: MENTOR_MODEL,
-      max_tokens: 1800,
-      system,
-      messages: [...history, { role: 'user', content: message }],
+    const response = await client.chat.completions.create({
+      model: COS_OPENAI_MODEL,
+      max_completion_tokens: 1800,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            COS_SYSTEM_PROMPT,
+            '',
+            '--- LIVE PLATFORM DOSSIER ---',
+            context || '(dossier empty)',
+          ].join('\n'),
+        },
+        ...history,
+        { role: 'user', content: message },
+      ],
     })
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim()
-
+    const text = response.choices[0]?.message?.content?.trim()
     if (!text) {
       return NextResponse.json({ error: 'Empty Chief of Staff response' }, { status: 502 })
     }
