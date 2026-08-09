@@ -98,13 +98,13 @@ function tagFrequency(entries: TimeEntry[]): string {
   )
 }
 
-function spendingSummary(ledger: FinanceLedger, days = 30): string {
+function spendingSummary(ledger: FinanceLedger | null | undefined, days = 30): string {
   const cutoff = todayDateKey()
   const [y, m, d] = cutoff.split('-').map(Number)
   const from = new Date(Date.UTC(y, m - 1, d - (days - 1)))
   const fromKey = `${from.getUTCFullYear()}-${String(from.getUTCMonth() + 1).padStart(2, '0')}-${String(from.getUTCDate()).padStart(2, '0')}`
 
-  const recent = ledger.spends.filter((s) => s.date >= fromKey)
+  const recent = (ledger?.spends || []).filter((s) => s.date >= fromKey)
   if (recent.length === 0) return 'No personal spends logged in the last 30 days.'
 
   const byCat = new Map<string, number>()
@@ -116,7 +116,7 @@ function spendingSummary(ledger: FinanceLedger, days = 30): string {
       unexpected += s.amount
       byCat.set('Unexpected', (byCat.get('Unexpected') || 0) + s.amount)
     } else if (s.categoryId) {
-      const cat = ledger.categories.find((c) => c.id === s.categoryId)
+      const cat = (ledger?.categories || []).find((c) => c.id === s.categoryId)
       const name = cat?.name || 'Category'
       byCat.set(name, (byCat.get(name) || 0) + s.amount)
     }
@@ -147,13 +147,13 @@ function spendingSummary(ledger: FinanceLedger, days = 30): string {
 
 function journalDigest(entries: JournalEntry[], limit = 16): string {
   const ready = entries
-    .filter((e) => e.status === 'extracted' && e.extractedText.trim())
+    .filter((e) => e.status === 'extracted' && (e.extractedText || '').trim())
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit)
   if (ready.length === 0) return 'No journal pages extracted yet.'
   return ready
     .map((e) => {
-      const body = e.extractedText.trim().slice(0, 900)
+      const body = (e.extractedText || '').trim().slice(0, 900)
       const src =
         e.dateSource === 'extracted'
           ? `auto-dated${e.detectedDateRaw ? ` from "${e.detectedDateRaw}"` : ''}`
@@ -164,12 +164,12 @@ function journalDigest(entries: JournalEntry[], limit = 16): string {
 }
 
 function reflectionDigest(reflections: Record<string, WeekReflection>): string {
-  const keys = Object.keys(reflections).sort().slice(-4)
+  const keys = Object.keys(reflections || {}).sort().slice(-4)
   if (keys.length === 0) return 'No Sunday week reflections stored yet.'
   return keys
     .map((week) => {
       const r = reflections[week]
-      const patterns = r.patterns
+      const patterns = (r.patterns || [])
         .map((p) => `${p.pattern} → ${p.evolution}`)
         .filter((x) => x.trim() !== '→')
         .join('; ')
@@ -234,11 +234,11 @@ export function buildMentorContext(state: AppState): string {
       .map(([k, n]) => `${FEELING_LABEL[k as SessionFeeling]}×${n}`)
       .join(', ') || 'none yet'
 
-  const habits = state.habits
+  const habits = (state.habits || [])
     .map((h) => `${h.name} streak=${h.streak}${h.lastCompletedDate ? ` last=${h.lastCompletedDate}` : ''}`)
     .join('; ')
 
-  const goals = state.weeklyGoals
+  const goals = (state.weeklyGoals || [])
     .filter((g) => g.text.trim())
     .map((g) => {
       const hit = g.hit === true ? 'HIT' : g.hit === false ? 'MISS' : 'OPEN'
@@ -246,23 +246,23 @@ export function buildMentorContext(state: AppState): string {
     })
     .join('; ')
 
-  const vision = state.visionGoals
+  const vision = (state.visionGoals || [])
     .slice(0, 6)
     .map((g) => `${g.title}: ${g.body.slice(0, 160)}`)
     .join(' | ')
 
-  const openLoops = state.openLoops
+  const openLoops = (state.openLoops || [])
     .filter((l) => !l.done)
     .map((l) => l.text)
     .slice(0, 12)
     .join('; ')
 
-  const priorInsight = state.mentor.latestInsight
+  const priorInsight = state.mentor?.latestInsight
     ? formatInsightBrief(state.mentor.latestInsight)
     : 'none'
 
-  const visionById = new Map(state.visionGoals.map((v) => [v.id, v.title]))
-  const cascade = state.weeklyGoals
+  const visionById = new Map((state.visionGoals || []).map((v) => [v.id, v.title]))
+  const cascade = (state.weeklyGoals || [])
     .filter((g) => g.text.trim())
     .map((g) => {
       const v = g.visionGoalId ? visionById.get(g.visionGoalId) : null
@@ -282,7 +282,7 @@ export function buildMentorContext(state: AppState): string {
     })
     .join('\n')
 
-  const charges = state.mentor.charges || []
+  const charges = state.mentor?.charges || []
   const openCharges = charges.filter((c) => c.status === 'open')
   const clearedCharges = charges
     .filter((c) => c.status === 'actioned' || c.status === 'dismissed')
@@ -342,10 +342,10 @@ export function buildMentorContext(state: AppState): string {
     spendingSummary(state.personalFinance),
     '',
     '## Sunday reflections',
-    reflectionDigest(state.weekReflections),
+    reflectionDigest(state.weekReflections || {}),
     '',
     '## Journal extracts (dated — use entry dates for temporal patterns)',
-    journalDigest(state.mentor.journalEntries),
+    journalDigest(state.mentor?.journalEntries || []),
     '',
     '## Prior mentor synthesis',
     priorInsight,
@@ -370,10 +370,10 @@ function formatChargeList(title: string, charges: MentorCharge[]): string {
 export function formatInsightBrief(insight: MentorInsight): string {
   return [
     insight.summary,
-    `Weapons: ${insight.weapons.join(' | ') || '-'}`,
-    `Drags: ${insight.drags.join(' | ') || '-'}`,
-    `Blind spots: ${insight.blindSpots.join(' | ') || '-'}`,
-    `Prescriptions: ${insight.prescriptions.join(' | ') || '-'}`,
+    `Weapons: ${(insight.weapons || []).join(' | ') || '-'}`,
+    `Drags: ${(insight.drags || []).join(' | ') || '-'}`,
+    `Blind spots: ${(insight.blindSpots || []).join(' | ') || '-'}`,
+    `Prescriptions: ${(insight.prescriptions || []).join(' | ') || '-'}`,
   ].join('\n')
 }
 
@@ -393,12 +393,12 @@ When analyzing, hunt for:
 
 Keep replies dense and usable. Prefer short sections with hard edges over essays.`
 
-export const ANALYZE_JSON_INSTRUCTION = `Return ONLY valid JSON (no markdown fences) with this shape:
-{
-  "summary": "2-4 sentence read on how they currently operate",
-  "weapons": ["what makes them lethal — specific, evidence-backed"],
-  "drags": ["what bleeds performance — specific, evidence-backed"],
-  "blindSpots": ["patterns they are likely missing"],
-  "prescriptions": ["concrete systems / rules / constraints to install"],
-  "chatReply": "short mentor message to show in the chat thread summarizing the synthesis"
-}`
+export const ANALYZE_JSON_INSTRUCTION = `Call the submit_mentor_synthesis tool exactly once with the full structured synthesis.
+Do not return markdown fences or freeform JSON outside the tool.
+Fill every field with concrete, evidence-backed content from the dossier:
+- summary: 2-4 sentence read on how they currently operate
+- weapons: what makes them lethal
+- drags: what bleeds performance
+- blindSpots: patterns they are likely missing
+- prescriptions: concrete systems / rules / constraints to install
+- chatReply: short mentor message for the chat thread summarizing the synthesis`

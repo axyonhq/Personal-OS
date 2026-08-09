@@ -1737,15 +1737,22 @@ export function useStore() {
     id?: string
     createdAt?: string
   }) => {
+    const list = (v: unknown) =>
+      Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 12)
+        : []
     const next: MentorInsight = {
       id: insight.id || uid('insight'),
       createdAt: insight.createdAt || new Date().toISOString(),
-      summary: insight.summary,
-      weapons: insight.weapons,
-      drags: insight.drags,
-      blindSpots: insight.blindSpots,
-      prescriptions: insight.prescriptions,
-      installed: insight.installed,
+      summary: typeof insight.summary === 'string' ? insight.summary.trim() : '',
+      weapons: list(insight.weapons),
+      drags: list(insight.drags),
+      blindSpots: list(insight.blindSpots),
+      prescriptions: list(insight.prescriptions),
+      installed: list(insight.installed),
+    }
+    if (!next.summary) {
+      throw new Error('Mentor synthesis missing summary')
     }
     update((s) => {
       const now = next.createdAt
