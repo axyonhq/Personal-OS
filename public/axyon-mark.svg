@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#000000"/>
+  <defs>
+    <linearGradient id="chrome" x1="8" y1="8" x2="40" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4F7FA"/>
+      <stop offset="0.45" stop-color="#A8B4C4"/>
+      <stop offset="1" stop-color="#6E7B8C"/>
+    </linearGradient>
+    <linearGradient id="blueMetal" x1="34" y1="12" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9AE8FF"/>
+      <stop offset="0.4" stop-color="#2EC8FF"/>
+      <stop offset="1" stop-color="#0A7FB8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Left pillar -->
+  <path d="M14 50 L28 14 L34.5 14 L20.5 50 Z" fill="url(#chrome)"/>
+  <!-- Crossbar spike -->
+  <path d="M18 33.5 L46 30.5 L47.5 33.2 L19.5 36.2 Z" fill="url(#chrome)"/>
+  <!-- Right shards -->
+  <path d="M36 14 L42 14 L52 50 L45.5 50 Z" fill="url(#blueMetal)" filter="url(#glow)"/>
+  <path d="M40.5 28 L48 28 L51.5 42 L44 42 Z" fill="url(#blueMetal)" opacity="0.85"/>
+</svg>

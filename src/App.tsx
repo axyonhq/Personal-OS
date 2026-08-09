@@ -2,12 +2,14 @@
 
 import { UserButton } from '@clerk/nextjs'
 import { useCallback, useEffect, useState } from 'react'
+import { AxyonMark } from './components/brand/AxyonMark'
+import { ColdEmailView } from './components/business/ColdEmailView'
+import { CommandDeckView } from './components/business/CommandDeckView'
 import { CompanyDecisionGateView } from './components/business/CompanyDecisionGateView'
 import { CompanyDocumentsView } from './components/business/CompanyDocumentsView'
 import { CompanyIdeasView } from './components/business/CompanyIdeasView'
 import { CompanyLoginsView } from './components/business/CompanyLoginsView'
 import { CompanyTodosView } from './components/business/CompanyTodosView'
-import { ColdEmailView } from './components/business/ColdEmailView'
 import { AutopilotView } from './components/AutopilotView'
 import { CalendarView } from './components/CalendarView'
 import { DashboardView } from './components/DashboardView'
@@ -53,26 +55,120 @@ const PERSONAL_TABS: {
 const PERSONAL_PRIMARY: AppTab[] = ['dashboard', 'tasks', 'autopilot', 'mentor']
 const PERSONAL_MORE: AppTab[] = ['vision', 'calendar', 'personalFinances']
 
-const BUSINESS_TABS: {
+type BusinessNavItem = {
   id: BusinessTab
   label: string
   shortLabel: string
   mark: string
   enabled: boolean
-}[] = [
-  { id: 'todos', label: 'To-Dos', shortLabel: 'To-Dos', mark: 'T', enabled: true },
-  { id: 'finance', label: 'Finance', shortLabel: 'Finance', mark: '$', enabled: true },
-  { id: 'documents', label: 'Documents', shortLabel: 'Docs', mark: 'D', enabled: true },
-  { id: 'ideas', label: 'Ideas', shortLabel: 'Ideas', mark: 'I', enabled: true },
-  { id: 'logins', label: 'Logins', shortLabel: 'Logins', mark: 'L', enabled: true },
-  { id: 'decisions', label: 'Decision Gate', shortLabel: 'Decide', mark: 'G', enabled: true },
-  { id: 'metaAds', label: 'Meta Ads', shortLabel: 'Ads', mark: 'A', enabled: false },
-  { id: 'coldEmail', label: 'Cold Email', shortLabel: 'Email', mark: 'E', enabled: true },
-  { id: 'agents', label: 'Agents', shortLabel: 'Agents', mark: 'N', enabled: false },
+  group: 'deck' | 'build' | 'machine' | 'vault'
+  sub: string
+}
+
+const BUSINESS_TABS: BusinessNavItem[] = [
+  {
+    id: 'commandDeck',
+    label: 'Command Deck',
+    shortLabel: 'Deck',
+    mark: '✦',
+    enabled: true,
+    group: 'deck',
+    sub: 'Pulse',
+  },
+  {
+    id: 'todos',
+    label: 'To-Dos',
+    shortLabel: 'To-Dos',
+    mark: 'T',
+    enabled: true,
+    group: 'deck',
+    sub: 'Execution',
+  },
+  {
+    id: 'decisions',
+    label: 'Decision Gate',
+    shortLabel: 'Decide',
+    mark: 'G',
+    enabled: true,
+    group: 'deck',
+    sub: 'Open loops',
+  },
+  {
+    id: 'ideas',
+    label: 'Ideas',
+    shortLabel: 'Ideas',
+    mark: 'I',
+    enabled: true,
+    group: 'build',
+    sub: 'Brain dump',
+  },
+  {
+    id: 'coldEmail',
+    label: 'Cold Email',
+    shortLabel: 'Email',
+    mark: 'E',
+    enabled: true,
+    group: 'build',
+    sub: 'Domains & mailboxes',
+  },
+  {
+    id: 'metaAds',
+    label: 'Meta Ads',
+    shortLabel: 'Ads',
+    mark: 'A',
+    enabled: false,
+    group: 'machine',
+    sub: 'Coming soon',
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    shortLabel: 'Agents',
+    mark: 'N',
+    enabled: false,
+    group: 'machine',
+    sub: 'Coming soon',
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    shortLabel: 'Docs',
+    mark: 'D',
+    enabled: true,
+    group: 'vault',
+    sub: 'Library',
+  },
+  {
+    id: 'logins',
+    label: 'Logins',
+    shortLabel: 'Logins',
+    mark: 'L',
+    enabled: true,
+    group: 'vault',
+    sub: 'Credentials',
+  },
+  {
+    id: 'finance',
+    label: 'Finance',
+    shortLabel: 'Finance',
+    mark: '$',
+    enabled: true,
+    group: 'vault',
+    sub: 'Cash & burn',
+  },
 ]
 
-const BUSINESS_PRIMARY: BusinessTab[] = ['todos', 'finance', 'documents', 'ideas']
-const BUSINESS_MORE: BusinessTab[] = ['logins', 'decisions', 'coldEmail']
+const BUSINESS_NAV_GROUPS: { id: BusinessNavItem['group']; label: string }[] = [
+  { id: 'deck', label: 'Deck' },
+  { id: 'build', label: 'Build' },
+  { id: 'machine', label: 'Machine' },
+  { id: 'vault', label: 'Vault' },
+]
+
+const BUSINESS_PRIMARY: BusinessTab[] = ['commandDeck', 'todos', 'finance', 'ideas']
+const BUSINESS_MORE: BusinessTab[] = ['decisions', 'coldEmail', 'documents', 'logins']
+
+const BUSINESS_TAB_IDS = new Set<BusinessTab>(BUSINESS_TABS.map((t) => t.id))
 
 function readLayer(): AppLayer {
   try {
@@ -95,21 +191,14 @@ function writeLayer(layer: AppLayer) {
 function readBusinessTab(): BusinessTab {
   try {
     const raw = localStorage.getItem(BUSINESS_TAB_KEY)
-    if (
-      raw === 'todos' ||
-      raw === 'finance' ||
-      raw === 'documents' ||
-      raw === 'ideas' ||
-      raw === 'logins' ||
-      raw === 'decisions' ||
-      raw === 'coldEmail'
-    ) {
-      return raw
+    if (raw && BUSINESS_TAB_IDS.has(raw as BusinessTab)) {
+      const tab = BUSINESS_TABS.find((t) => t.id === raw)
+      if (tab?.enabled) return raw as BusinessTab
     }
   } catch {
     // ignore
   }
-  return 'todos'
+  return 'commandDeck'
 }
 
 function writeBusinessTab(tab: BusinessTab) {
@@ -140,7 +229,7 @@ function NavGlyph({ kind, mark }: { kind: string; mark: string }) {
 export default function App() {
   const store = useStore()
   const [layer, setLayer] = useState<AppLayer>('gate')
-  const [businessTab, setBusinessTab] = useState<BusinessTab>('todos')
+  const [businessTab, setBusinessTab] = useState<BusinessTab>('commandDeck')
   const [pendingSession, setPendingSession] = useState<ProjectId | null>(null)
   const [pendingSessionMinimized, setPendingSessionMinimized] = useState(false)
   const [pendingFocusNote, setPendingFocusNote] = useState('')
@@ -148,11 +237,26 @@ export default function App() {
   const [resetOpen, setResetOpen] = useState(false)
   const [docsDirty, setDocsDirty] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [clockLabel, setClockLabel] = useState('')
 
   useEffect(() => {
     setLayer(readLayer())
     setBusinessTab(readBusinessTab())
     setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date()
+      const day = now
+        .toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short' })
+        .toUpperCase()
+      const time = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      setClockLabel(`${day} · ${time}`)
+    }
+    tick()
+    const id = window.setInterval(tick, 30_000)
+    return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -240,7 +344,7 @@ export default function App() {
   }
 
   const enterBusiness = () => {
-    setBusinessTab((t) => (t === 'metaAds' || t === 'agents' ? 'todos' : t))
+    setBusinessTab((t) => (t === 'metaAds' || t === 'agents' ? 'commandDeck' : t))
     setLayer('business')
   }
 
@@ -282,7 +386,7 @@ export default function App() {
 
   const isBusiness = layer === 'business'
   const pageTitle = isBusiness ? activeBusiness.label : activePersonal.label
-  const pageSub = isBusiness ? 'Company OS' : activePersonal.sub
+  const pageSub = activePersonal.sub
 
   const personalPrimaryTabs = PERSONAL_TABS.filter((t) => PERSONAL_PRIMARY.includes(t.id))
   const personalMoreTabs = PERSONAL_TABS.filter((t) => PERSONAL_MORE.includes(t.id))
@@ -290,41 +394,62 @@ export default function App() {
 
   return (
     <div className={`app-shell app-shell-rail${isBusiness ? ' layer-business' : ' layer-personal'}`}>
-      <aside className="app-rail" aria-label={isBusiness ? 'Batcave navigation' : 'Command Center navigation'}>
+      <aside className="app-rail" aria-label={isBusiness ? 'AXYON navigation' : 'Command Center navigation'}>
         <div className="rail-brand">
-          <span className="rail-mark" aria-hidden="true">
-            <span className="rail-mark-core" />
-          </span>
-          <div className="rail-brand-copy">
-            <span className="brand-name">{isBusiness ? 'BATCAVE' : 'COMMAND'}</span>
-            <span className="brand-sub">{isBusiness ? 'Company OS' : 'Center'}</span>
-          </div>
+          {isBusiness ? (
+            <>
+              <AxyonMark size={34} className="rail-axyon-mark" />
+              <div className="rail-brand-copy">
+                <span className="brand-name axyon-wordmark">AXYON</span>
+                <span className="brand-sub">Company OS</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="rail-mark" aria-hidden="true">
+                <span className="rail-mark-core" />
+              </span>
+              <div className="rail-brand-copy">
+                <span className="brand-name">COMMAND</span>
+                <span className="brand-sub">Center</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Desktop: full vertical list */}
         <nav
           className="rail-nav rail-nav-desktop"
           role="tablist"
-          aria-label={isBusiness ? 'Batcave sections' : 'Command Center sections'}
+          aria-label={isBusiness ? 'AXYON sections' : 'Command Center sections'}
         >
           {isBusiness
-            ? BUSINESS_TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={businessTab === t.id}
-                  className={`rail-item${businessTab === t.id ? ' active' : ''}${t.enabled ? '' : ' disabled'}`}
-                  disabled={!t.enabled}
-                  onClick={() => {
-                    if (t.enabled) switchBusinessTab(t.id)
-                  }}
-                >
-                  <NavGlyph kind={t.id} mark={t.mark} />
-                  <span className="rail-item-label">{t.label}</span>
-                  {!t.enabled && <span className="tab-soon">Soon</span>}
-                </button>
-              ))
+            ? BUSINESS_NAV_GROUPS.map((group) => {
+                const items = BUSINESS_TABS.filter((t) => t.group === group.id)
+                return (
+                  <div key={group.id} className="rail-group">
+                    <p className="rail-group-label">{group.label}</p>
+                    {items.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={businessTab === t.id}
+                        className={`rail-item${businessTab === t.id ? ' active' : ''}${t.enabled ? '' : ' disabled'}`}
+                        disabled={!t.enabled}
+                        onClick={() => {
+                          if (t.enabled) switchBusinessTab(t.id)
+                        }}
+                      >
+                        <span className="rail-active-pip" aria-hidden="true" />
+                        <NavGlyph kind={t.id} mark={t.mark} />
+                        <span className="rail-item-label">{t.label}</span>
+                        {!t.enabled && <span className="tab-soon">Soon</span>}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })
             : PERSONAL_TABS.map((t) => {
                 const enabled = t.enabled !== false
                 return (
@@ -351,7 +476,7 @@ export default function App() {
         <nav
           className="rail-nav rail-nav-mobile"
           role="tablist"
-          aria-label={isBusiness ? 'Batcave sections' : 'Command Center sections'}
+          aria-label={isBusiness ? 'AXYON sections' : 'Command Center sections'}
         >
           {isBusiness
             ? businessPrimaryTabs.map((t) => (
@@ -396,6 +521,12 @@ export default function App() {
         </nav>
 
         <div className="rail-foot rail-foot-desktop">
+          {isBusiness && (
+            <div className="rail-systems-live" aria-live="polite">
+              <span className="rail-systems-dot" aria-hidden="true" />
+              <span>All systems live</span>
+            </div>
+          )}
           <button type="button" className="rail-switch" onClick={switchLayerToGate}>
             <span className="rail-switch-kicker">Layer</span>
             <span className="rail-switch-label">Switch layer</span>
@@ -404,14 +535,27 @@ export default function App() {
       </aside>
 
       <div className="app-stage">
-        <header className="command-bar">
+        <header className={`command-bar${isBusiness ? ' axyon-command-bar' : ''}`}>
           <div className="brand-lockup stage-title">
-            <span className="brand-name">{pageTitle}</span>
-            <span className="brand-sub desktop-only">{pageSub}</span>
+            {isBusiness ? (
+              <>
+                <span className="brand-crumb desktop-only">Axyon</span>
+                <span className="brand-crumb-sep desktop-only" aria-hidden="true">
+                  /
+                </span>
+                <span className="brand-name">{pageTitle}</span>
+              </>
+            ) : (
+              <>
+                <span className="brand-name">{pageTitle}</span>
+                <span className="brand-sub desktop-only">{pageSub}</span>
+              </>
+            )}
           </div>
           <div className="status-pills">
             {isBusiness ? (
               <>
+                <span className="status-pill status-pill-date desktop-only">{clockLabel}</span>
                 <button
                   type="button"
                   className="ghost-btn desktop-only"
@@ -497,6 +641,9 @@ export default function App() {
         <main className="app-content" key={browseKey}>
           {isBusiness ? (
             <>
+              {businessTab === 'commandDeck' && (
+                <CommandDeckView store={store} onNavigate={switchBusinessTab} />
+              )}
               {businessTab === 'todos' && <CompanyTodosView />}
               {businessTab === 'finance' && <FinancesView store={store} realm="company" />}
               {businessTab === 'documents' && (
@@ -565,15 +712,7 @@ export default function App() {
                       <NavGlyph kind={t.id} mark={t.mark} />
                       <span>
                         <strong>{t.label}</strong>
-                        <em>
-                          {t.id === 'decisions'
-                            ? 'Open loops'
-                            : t.id === 'logins'
-                              ? 'Credentials'
-                              : t.id === 'coldEmail'
-                                ? 'Domains & mailboxes'
-                                : t.shortLabel}
-                        </em>
+                        <em>{t.sub}</em>
                       </span>
                     </button>
                   ))}
@@ -591,7 +730,7 @@ export default function App() {
                   <NavGlyph kind="layers" mark="L" />
                   <span>
                     <strong>Switch layer</strong>
-                    <em>Personal ↔ Business</em>
+                    <em>Personal ↔ AXYON</em>
                   </span>
                 </button>
                 {!isBusiness && (

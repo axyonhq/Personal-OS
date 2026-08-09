@@ -1,6 +1,6 @@
-# Batcave — Deep Work
+# AXYON — Command OS
 
-Sleek deep work command center: timers, daily targets, today/backlog tasks, and a 3-day calendar.
+Company OS (AXYON) + personal Command Center: deep work, money, and company ops in Next.js.
 
 ## Run
 
@@ -13,9 +13,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Features
 
-- **Two layers after login** — Command Center (personal) and Batcave (company), chosen from a gate screen
+- **Two layers after login** — Command Center (personal) and AXYON (company), chosen from a gate screen
 - **Command Center** — dashboard, deep work, personal finances
-- **Batcave** — company to-dos (HPA tiers + blockers), company finance (Revolut + buckets), roadmap tabs (Meta Ads / Cold Email / Agents)
+- **AXYON** — Command Deck, to-dos, decision gate, ideas, cold email, documents, logins, company finance (Revolut + buckets); Meta Ads / Agents marked soon
 - **Daily deep work target** — set hours/day, see hit/miss, streak, and week hit rate
 - **Today's One Thing** — single outcome to protect
 - **Project tasks** — brain-dump backlog; default view shows only today's tasks; toggle **Show all tasks** to promote/demote with Today/Later

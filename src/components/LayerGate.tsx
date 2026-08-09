@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { AxyonMark } from './brand/AxyonMark'
 
 type Props = {
   onEnterPersonal: () => void
@@ -8,7 +9,7 @@ type Props = {
   accountSlot?: ReactNode
 }
 
-type Portal = 'batcave' | 'command' | null
+type Portal = 'axyon' | 'command' | null
 
 export function LayerGate({ onEnterPersonal, onEnterBusiness, accountSlot }: Props) {
   const [ready, setReady] = useState(false)
@@ -23,7 +24,7 @@ export function LayerGate({ onEnterPersonal, onEnterBusiness, accountSlot }: Pro
     if (exiting) return
     setExiting(portal)
     window.setTimeout(() => {
-      if (portal === 'batcave') onEnterBusiness()
+      if (portal === 'axyon') onEnterBusiness()
       else onEnterPersonal()
     }, 780)
   }
@@ -31,7 +32,7 @@ export function LayerGate({ onEnterPersonal, onEnterBusiness, accountSlot }: Pro
   return (
     <div
       className={`layer-gate bare${ready ? ' is-ready' : ''}${exiting ? ' is-exiting' : ''}${
-        exiting === 'batcave' ? ' exit-batcave' : exiting === 'command' ? ' exit-command' : ''
+        exiting === 'axyon' ? ' exit-axyon' : exiting === 'command' ? ' exit-command' : ''
       }`}
     >
       <div className="layer-gate-ambiance" aria-hidden="true">
@@ -46,15 +47,16 @@ export function LayerGate({ onEnterPersonal, onEnterBusiness, accountSlot }: Pro
       <div className="layer-gate-portals">
         <button
           type="button"
-          className={`layer-portal portal-batcave${exiting === 'batcave' ? ' is-activating' : ''}`}
-          onClick={() => enter('batcave')}
+          className={`layer-portal portal-axyon${exiting === 'axyon' ? ' is-activating' : ''}`}
+          onClick={() => enter('axyon')}
           disabled={!!exiting}
         >
           <span className="layer-portal-beam" aria-hidden="true" />
           <span className="layer-portal-ring" aria-hidden="true" />
           <span className="layer-portal-copy">
-            <span className="layer-portal-kicker">Business</span>
-            <span className="layer-portal-name">Batcave</span>
+            <AxyonMark size={56} className="layer-portal-mark" />
+            <span className="layer-portal-kicker">Company</span>
+            <span className="layer-portal-name axyon-portal-name">AXYON</span>
             <span className="layer-portal-enter">Enter</span>
           </span>
         </button>

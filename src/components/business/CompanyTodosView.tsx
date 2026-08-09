@@ -478,7 +478,7 @@ export function CompanyTodosView() {
 
   return (
     <div className="layout-stack company-todos">
-      <HudPanel label="Company to-dos">
+      <HudPanel label="To-Dos">
         <div className="company-todo-toolbar">
           <p className="finance-hint">{focusHint}</p>
           {hiddenCount > 0 && (

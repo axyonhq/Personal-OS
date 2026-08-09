@@ -398,11 +398,12 @@ export function normalizeActiveTab(tab: unknown): AppTab {
   return 'dashboard'
 }
 
-/** Post-login layer: hub gate, personal OS, or company Batcave */
+/** Post-login layer: hub gate, personal OS, or company AXYON */
 export type AppLayer = 'gate' | 'personal' | 'business'
 
-/** Tabs inside the Batcave (company) layer */
+/** Tabs inside the AXYON (company) layer */
 export type BusinessTab =
+  | 'commandDeck'
   | 'todos'
   | 'finance'
   | 'documents'
@@ -585,15 +586,15 @@ export interface AppState {
   revolutCredentials?: RevolutCredentials
   /** Long-term inspiring goals */
   visionGoals: VisionGoal[]
-  /** Batcave documents (offer docs, briefs, etc.) */
+  /** AXYON documents (offer docs, briefs, etc.) */
   companyDocuments: CompanyDocument[]
-  /** Batcave idea dump */
+  /** AXYON idea dump */
   companyIdeas: CompanyIdea[]
-  /** Batcave platform logins / credentials vault */
+  /** AXYON platform logins / credentials vault */
   companyLogins: CompanyLogin[]
-  /** Batcave Decision Gate — open loops & pending choices */
+  /** AXYON Decision Gate — open loops & pending choices */
   companyDecisions: CompanyDecision[]
-  /** Batcave Cold Email — sending domains + mailboxes */
+  /** AXYON Cold Email — sending domains + mailboxes */
   coldEmailDomains: ColdEmailDomain[]
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
@@ -641,7 +642,7 @@ export interface CompanyDecisionOption {
 
 export type CompanyDecisionStatus = 'open' | 'decided'
 
-/** A pending or resolved choice in the Batcave Decision Gate */
+/** A pending or resolved choice in the AXYON Decision Gate */
 export interface CompanyDecision {
   id: string
   /** The decision / question */

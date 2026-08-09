@@ -22,14 +22,14 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Batcave — Deep Work',
-  description: 'Deep work command center',
+  title: 'AXYON — Command OS',
+  description: 'Company OS and personal command center',
   icons: {
-    icon: '/favicon.svg',
+    icon: '/axyon-mark.svg',
   },
   appleWebApp: {
     capable: true,
-    title: 'Batcave',
+    title: 'AXYON',
     statusBarStyle: 'black-translucent',
   },
   formatDetection: {
