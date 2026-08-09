@@ -277,6 +277,8 @@ export interface CoSBrief {
   unmadeDecisions: string[]
   createdAt: string
   readAt?: string
+  /** When this brief was posted to Slack */
+  slackSentAt?: string
 }
 
 export interface CoSInsight {
@@ -315,7 +317,7 @@ export function emptyChiefOfStaffState(): ChiefOfStaffState {
     latestInsight: null,
     insightHistory: [],
     morningHour: 7,
-    nightHour: 20,
+    nightHour: 22,
     proactiveEnabled: true,
   }
 }

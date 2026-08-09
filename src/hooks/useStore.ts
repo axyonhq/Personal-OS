@@ -401,6 +401,7 @@ function migrateChiefOfStaffState(raw: unknown): ChiefOfStaffState {
               typeof b.createdAt === 'string' ? b.createdAt : new Date().toISOString(),
           }
           if (typeof b.readAt === 'string') next.readAt = b.readAt
+          if (typeof b.slackSentAt === 'string') next.slackSentAt = b.slackSentAt
           return next
         })
         .filter((b): b is CoSBrief => b != null)
@@ -442,7 +443,9 @@ function migrateChiefOfStaffState(raw: unknown): ChiefOfStaffState {
   const nightHour =
     typeof c.nightHour === 'number' && c.nightHour >= 0 && c.nightHour <= 23
       ? Math.round(c.nightHour)
-      : 20
+      : 22
+  // Migrate previous default (20) to the new 22:00 WITA night brief.
+  const resolvedNight = nightHour === 20 && c.nightHour === 20 ? 22 : nightHour
 
   return {
     messages: messages.length > 0 ? messages : empty.messages,
@@ -450,7 +453,7 @@ function migrateChiefOfStaffState(raw: unknown): ChiefOfStaffState {
     latestInsight,
     insightHistory,
     morningHour,
-    nightHour,
+    nightHour: resolvedNight,
     proactiveEnabled: c.proactiveEnabled !== false,
   }
 }
@@ -2228,6 +2231,22 @@ export function useStore() {
     [update],
   )
 
+  const markCoSBriefSlackSent = useCallback(
+    (id: string) => {
+      const now = new Date().toISOString()
+      update((s) => ({
+        ...s,
+        chiefOfStaff: {
+          ...s.chiefOfStaff,
+          briefs: (s.chiefOfStaff?.briefs || []).map((b) =>
+            b.id === id ? { ...b, slackSentAt: b.slackSentAt || now } : b,
+          ),
+        },
+      }))
+    },
+    [update],
+  )
+
   const saveCoSInsight = useCallback(
     (
       insight: Omit<CoSInsight, 'id' | 'createdAt'> & {
@@ -3491,6 +3510,7 @@ export function useStore() {
     appendCoSMessage,
     saveCoSBrief,
     markCoSBriefRead,
+    markCoSBriefSlackSent,
     saveCoSInsight,
     setCoSProactive,
     setCoSBriefHours,

@@ -4,36 +4,23 @@ import { useAuth, useSession } from '@clerk/nextjs'
 import { useCallback, useEffect, useRef } from 'react'
 import type { Store } from '../hooks/useStore'
 import { buildChiefOfStaffContext } from '../lib/chiefOfStaff/context'
+import {
+  deliverBriefToSlack,
+  requestCosNotificationPermission,
+  showCosBrowserNotification,
+} from '../lib/chiefOfStaff/deliverClient'
 import { listCompanyTasks } from '../lib/supabase/companyTodos'
 import type { CoSBriefSlot } from '../types'
 import { todayDateKey, nowMinutesInAppTz } from '../utils/time'
 
 /**
  * Fires morning/night Chief of Staff briefs while the app is open.
- * Delivery is in-app (+ browser notification if allowed).
+ * Delivers in-app + browser notification + Slack (if configured).
  */
 export function ChiefOfStaffBriefHost({ store }: { store: Store }) {
   const { userId, isLoaded } = useAuth()
   const { session } = useSession()
   const running = useRef(false)
-  const notifiedPermission = useRef(false)
-
-  const ensureNotificationPermission = useCallback(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return
-    if (Notification.permission !== 'default' || notifiedPermission.current) return
-    notifiedPermission.current = true
-    void Notification.requestPermission()
-  }, [])
-
-  const maybeNotify = useCallback((title: string, body: string) => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return
-    if (Notification.permission !== 'granted') return
-    try {
-      new Notification(title, { body, tag: 'axyon-cos-brief' })
-    } catch {
-      // ignore
-    }
-  }, [])
 
   const runDueBrief = useCallback(async () => {
     const cos = store.state.chiefOfStaff
@@ -82,7 +69,6 @@ export function ChiefOfStaffBriefHost({ store }: { store: Store }) {
       }
       if (!res.ok || !data.brief) return
 
-      // Re-check in case another tab wrote the brief.
       if (store.hasCoSBrief(date, slot)) return
 
       const saved = store.saveCoSBrief({
@@ -94,26 +80,30 @@ export function ChiefOfStaffBriefHost({ store }: { store: Store }) {
         unmadeDecisions: data.brief.unmadeDecisions || [],
         chatReply: data.brief.chatReply,
       })
-      maybeNotify(
+
+      showCosBrowserNotification(
         `AXYON ${slot === 'morning' ? 'Morning' : 'Night'} brief`,
         saved.summary.slice(0, 140),
       )
+
+      const slack = await deliverBriefToSlack(saved)
+      if (slack.ok) store.markCoSBriefSlackSent(saved.id)
     } catch {
       // Silent — will retry next tick.
     } finally {
       running.current = false
     }
-  }, [maybeNotify, session, store, userId])
+  }, [session, store, userId])
 
   useEffect(() => {
     if (!isLoaded) return
-    ensureNotificationPermission()
+    requestCosNotificationPermission()
     void runDueBrief()
     const id = window.setInterval(() => {
       void runDueBrief()
     }, 60_000)
     return () => window.clearInterval(id)
-  }, [ensureNotificationPermission, isLoaded, runDueBrief])
+  }, [isLoaded, runDueBrief])
 
   return null
 }
