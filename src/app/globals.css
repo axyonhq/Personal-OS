@@ -3618,6 +3618,94 @@ body:has(.gate-shell)::before {
   letter-spacing: 0.02em;
 }
 
+.company-todo-deadline {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.company-todo-deadline:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.company-todo-deadline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.company-todo-deadline.tone-none {
+  color: var(--text-dim);
+}
+
+.company-todo-deadline.tone-ok {
+  color: var(--text-muted);
+}
+
+.company-todo-deadline.tone-soon {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+
+.company-todo-deadline.tone-overdue {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
+.company-todo-energy.platform-select,
+.company-todo-estimate.platform-select {
+  min-width: 5.5rem;
+}
+
+.company-todo-estimate.platform-select {
+  min-width: 6.25rem;
+}
+
+.company-deadline-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.company-deadline-editor input[type='date'] {
+  width: 100%;
+  max-width: 16rem;
+}
+
+.company-todo-deadline-preview {
+  margin: 0;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.company-todo-deadline-preview.tone-soon {
+  color: var(--warn);
+}
+
+.company-todo-deadline-preview.tone-overdue {
+  color: var(--danger);
+}
+
+.company-deadline-actions {
+  justify-content: flex-end;
+  width: 100%;
+}
+
 .company-todo-blocked,
 .company-todo-blocking {
   margin: 0.55rem 0 0;
