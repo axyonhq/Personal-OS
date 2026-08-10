@@ -1,4 +1,4 @@
-/** Keep the dossier small enough that one Claude call finishes inside Vercel. */
+/** Keep the dossier small enough that one OpenAI call finishes inside Vercel. */
 export const MENTOR_CONTEXT_CHAR_LIMIT = 36_000
 
 export function clipMentorContext(context: string, limit = MENTOR_CONTEXT_CHAR_LIMIT): string {

@@ -206,7 +206,7 @@ function sessionLines(entries: TimeEntry[], limit = 30): string {
     .join('\n')
 }
 
-/** Compact operating dossier for Claude — pattern recognition fuel. */
+/** Compact operating dossier for the mentor model — pattern recognition fuel. */
 export function buildMentorContext(state: AppState): string {
   const entries = state.timeEntries || []
   const withDebrief = entries.filter((e) => e.debrief)
