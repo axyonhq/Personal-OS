@@ -393,8 +393,8 @@ When analyzing, hunt for:
 
 Keep replies dense and usable. Prefer short sections with hard edges over essays.`
 
-export const ANALYZE_JSON_INSTRUCTION = `Call the submit_mentor_synthesis tool exactly once with the full structured synthesis.
-Do not return markdown fences or freeform JSON outside the tool.
+export const ANALYZE_JSON_INSTRUCTION = `Return the full structured synthesis as JSON matching the required schema.
+Do not wrap it in markdown fences. Do not add extra keys.
 Fill every field with concrete, evidence-backed content from the dossier:
 - summary: 2-4 sentence read on how they currently operate
 - weapons: what makes them lethal
