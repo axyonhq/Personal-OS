@@ -72,10 +72,13 @@ export function buildChiefOfStaffContext(
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .slice(0, 20)
-      .map(
-        (t) =>
-          `- [${t.status}/${t.priority}] ${t.title}${t.blockedByIds?.length ? ' (blocked)' : ''}${t.notes ? ` — note: ${truncate(t.notes, 120)}` : ''}`,
-      ),
+      .map((t) => {
+        const due = t.deadline ? ` due ${t.deadline}` : ''
+        const energy = t.energyRequired ? ` energy=${t.energyRequired}` : ''
+        const blocked = t.blockedByIds?.length ? ' (blocked)' : ''
+        const note = t.notes ? ` — note: ${truncate(t.notes, 120)}` : ''
+        return `- [${t.status}/${t.priority}] ${t.title}${due}${energy}${blocked}${note}`
+      }),
     '',
     '## Company · Decision Gate',
     `Open decisions: ${openDecisions.length} (overdue ${overdueDecisions.length}, due today ${dueToday.length})`,

@@ -15,8 +15,15 @@ import {
   unhideAllCompanyTasks,
   updateCompanyTask,
 } from '../../lib/supabase/companyTodos'
-import type { CompanyTask, CompanyTaskStatus, EisenhowerQuadrant } from '../../types'
+import type {
+  CompanyTask,
+  CompanyTaskEnergy,
+  CompanyTaskStatus,
+  EisenhowerQuadrant,
+} from '../../types'
+import { deadlineTone, formatDeadlineCountdown } from '../../utils/deadline'
 import { EISENHOWER_META, EISENHOWER_OPTIONS, EISENHOWER_ORDER } from '../../utils/eisenhower'
+import { todayDateKey } from '../../utils/time'
 
 type FocusFilter = 'focus' | 'all' | 'waiting' | 'done'
 
@@ -24,6 +31,13 @@ const STATUS_OPTIONS = [
   { value: 'not_started', label: 'Not started' },
   { value: 'in_progress', label: 'In progress' },
   { value: 'done', label: 'Done' },
+]
+
+const ENERGY_OPTIONS = [
+  { value: '', label: 'Energy' },
+  { value: 'max', label: 'Max' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'little', label: 'Little' },
 ]
 
 function compareBySortOrder(a: CompanyTask, b: CompanyTask) {
@@ -48,7 +62,11 @@ export function CompanyTodosView() {
   const [notesDirty, setNotesDirty] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTargetId, setDropTargetId] = useState<string | null>(null)
+  const [deadlineTask, setDeadlineTask] = useState<CompanyTask | null>(null)
+  const [deadlineDraft, setDeadlineDraft] = useState('')
+  const [deadlineSaving, setDeadlineSaving] = useState(false)
   const dragListIdsRef = useRef<string[]>([])
+  const today = todayDateKey()
 
   const refresh = useCallback(async () => {
     if (!session || !userId) return
@@ -205,6 +223,51 @@ export function CompanyTodosView() {
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update priority')
+    }
+  }
+
+  async function setTaskEnergy(task: CompanyTask, next: CompanyTaskEnergy | null) {
+    if (!session) return
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, energyRequired: next } : t)),
+    )
+    try {
+      await updateCompanyTask(session, task.id, { energyRequired: next })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update energy')
+      await refresh()
+    }
+  }
+
+  function openDeadlineEditor(task: CompanyTask) {
+    if (task.hidden) return
+    setDeadlineTask(task)
+    setDeadlineDraft(task.deadline ?? today)
+  }
+
+  async function closeDeadlineEditor() {
+    if (deadlineSaving) return
+    setDeadlineTask(null)
+    setDeadlineDraft('')
+  }
+
+  async function saveDeadline(clear = false) {
+    if (!session || !deadlineTask || deadlineSaving) return
+    const next = clear ? null : deadlineDraft || null
+    setDeadlineSaving(true)
+    setError(null)
+    setTasks((prev) =>
+      prev.map((t) => (t.id === deadlineTask.id ? { ...t, deadline: next } : t)),
+    )
+    try {
+      await updateCompanyTask(session, deadlineTask.id, { deadline: next })
+      setDeadlineTask(null)
+      setDeadlineDraft('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save deadline')
+      await refresh()
+    } finally {
+      setDeadlineSaving(false)
     }
   }
 
@@ -437,6 +500,28 @@ export function CompanyTodosView() {
               onChange={(v) => void setStatus(task, v as CompanyTaskStatus)}
               disabled={task.hidden}
             />
+            <button
+              type="button"
+              className={`company-todo-deadline tone-${deadlineTone(task.deadline, today)}`}
+              onClick={() => openDeadlineEditor(task)}
+              disabled={task.hidden}
+              title={task.deadline ? `Deadline ${task.deadline}` : 'Set deadline'}
+              aria-label={
+                task.deadline
+                  ? `Deadline ${formatDeadlineCountdown(task.deadline, today)}. Change deadline.`
+                  : 'Set deadline'
+              }
+            >
+              {formatDeadlineCountdown(task.deadline, today)}
+            </button>
+            <Select
+              className="company-todo-select company-todo-energy"
+              value={task.energyRequired ?? ''}
+              ariaLabel="Energy required"
+              options={ENERGY_OPTIONS}
+              onChange={(v) => void setTaskEnergy(task, (v || null) as CompanyTaskEnergy | null)}
+              disabled={task.hidden}
+            />
             {!task.hidden && (
               <button
                 type="button"
@@ -626,6 +711,28 @@ export function CompanyTodosView() {
               />
               <button
                 type="button"
+                className={`company-todo-deadline tone-${deadlineTone(openTask.deadline, today)}`}
+                onClick={() => openDeadlineEditor(openTask)}
+                title={openTask.deadline ? `Deadline ${openTask.deadline}` : 'Set deadline'}
+                aria-label={
+                  openTask.deadline
+                    ? `Deadline ${formatDeadlineCountdown(openTask.deadline, today)}. Change deadline.`
+                    : 'Set deadline'
+                }
+              >
+                {formatDeadlineCountdown(openTask.deadline, today)}
+              </button>
+              <Select
+                className="company-todo-select company-todo-energy"
+                value={openTask.energyRequired ?? ''}
+                ariaLabel="Energy required"
+                options={ENERGY_OPTIONS}
+                onChange={(v) =>
+                  void setTaskEnergy(openTask, (v || null) as CompanyTaskEnergy | null)
+                }
+              />
+              <button
+                type="button"
                 className="ghost-btn"
                 onClick={() => {
                   void hideTask(openTask)
@@ -698,6 +805,65 @@ export function CompanyTodosView() {
                 </button>
               </form>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!deadlineTask}
+        onClose={() => void closeDeadlineEditor()}
+        title="Deadline"
+        size="sm"
+        className="company-deadline-modal"
+        footer={
+          <div className="btn-row company-deadline-actions">
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void saveDeadline(true)}
+              disabled={deadlineSaving || !deadlineTask?.deadline}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="btn-secondary compact"
+              onClick={() => void closeDeadlineEditor()}
+              disabled={deadlineSaving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary compact"
+              onClick={() => void saveDeadline(false)}
+              disabled={deadlineSaving || !deadlineDraft}
+            >
+              {deadlineSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        {deadlineTask && (
+          <div className="company-deadline-editor">
+            <p className="finance-hint">
+              Pick a due date. The list shows a countdown after you save.
+            </p>
+            <label className="field-label" htmlFor="company-task-deadline">
+              Due date
+            </label>
+            <input
+              id="company-task-deadline"
+              type="date"
+              value={deadlineDraft}
+              onChange={(e) => setDeadlineDraft(e.target.value)}
+              aria-label="Deadline date"
+            />
+            {deadlineDraft && (
+              <p className={`company-todo-deadline-preview tone-${deadlineTone(deadlineDraft, today)}`}>
+                Preview: {formatDeadlineCountdown(deadlineDraft, today)}
+              </p>
+            )}
           </div>
         )}
       </Modal>

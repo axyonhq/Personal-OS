@@ -98,6 +98,13 @@ async function loadCompanyTasks(userId: string): Promise<CompanyTask[]> {
     parentId: (row.parent_id as string | null) ?? null,
     sortOrder: (row.sort_order as number) || 0,
     hidden: Boolean(row.hidden),
+    deadline: (row.deadline as string | null) ?? null,
+    energyRequired:
+      row.energy_required === 'max' ||
+      row.energy_required === 'medium' ||
+      row.energy_required === 'little'
+        ? (row.energy_required as CompanyTask['energyRequired'])
+        : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     blockedByIds: [],

@@ -492,6 +492,8 @@ export type EisenhowerQuadrant = 'do' | 'schedule' | 'delegate' | 'eliminate'
 /** @deprecated use EisenhowerQuadrant — kept as alias during migration */
 export type CompanyTaskPriority = EisenhowerQuadrant
 export type CompanyTaskStatus = 'not_started' | 'in_progress' | 'done'
+/** How much focus energy a company task needs */
+export type CompanyTaskEnergy = 'max' | 'medium' | 'little'
 
 export interface CompanyTask {
   id: string
@@ -505,6 +507,10 @@ export interface CompanyTask {
   sortOrder: number
   /** When true, the task row is blurred so the title cannot be read */
   hidden: boolean
+  /** YYYY-MM-DD due date; null means no deadline set */
+  deadline: string | null
+  /** Focus energy this task needs; null means unset */
+  energyRequired: CompanyTaskEnergy | null
   createdAt: string
   updatedAt: string
   /** Task IDs that must be done before this one can proceed */
