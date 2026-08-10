@@ -145,7 +145,7 @@ function spendingSummary(ledger: FinanceLedger | null | undefined, days = 30): s
   ].join(' ')
 }
 
-function journalDigest(entries: JournalEntry[], limit = 16): string {
+function journalDigest(entries: JournalEntry[], limit = 10): string {
   const ready = entries
     .filter((e) => e.status === 'extracted' && (e.extractedText || '').trim())
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
@@ -153,7 +153,7 @@ function journalDigest(entries: JournalEntry[], limit = 16): string {
   if (ready.length === 0) return 'No journal pages extracted yet.'
   return ready
     .map((e) => {
-      const body = (e.extractedText || '').trim().slice(0, 900)
+      const body = (e.extractedText || '').trim().slice(0, 500)
       const src =
         e.dateSource === 'extracted'
           ? `auto-dated${e.detectedDateRaw ? ` from "${e.detectedDateRaw}"` : ''}`
@@ -187,7 +187,7 @@ function reflectionDigest(reflections: Record<string, WeekReflection>): string {
     .join('\n\n')
 }
 
-function sessionLines(entries: TimeEntry[], limit = 40): string {
+function sessionLines(entries: TimeEntry[], limit = 30): string {
   return recentSessions(entries, limit)
     .map((e) => {
       const start =
@@ -336,7 +336,7 @@ export function buildMentorContext(state: AppState): string {
     `Feeling × length: ${correlateFeelingByDuration(entries).join('; ') || 'need more debriefs'}.`,
     '',
     '## Recent sessions (newest first)',
-    sessionLines(entries, 45) || '(none)',
+    sessionLines(entries, 30) || '(none)',
     '',
     '## Personal spending',
     spendingSummary(state.personalFinance),
