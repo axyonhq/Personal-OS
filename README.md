@@ -25,21 +25,23 @@ Open [http://localhost:3000](http://localhost:3000).
 - 3-day calendar (click-drag blocks) + monthly grid
 - Seeded from Claude artifact screenshots (Jul 2026)
 - Persists to `localStorage` + Supabase
-- **Mentor** — Claude-powered pattern recognition across deep work, breaks, session debriefs, spend, journals, and Sunday logs
+- **Mentor** — OpenAI-powered pattern recognition across deep work, breaks, session debriefs, spend, journals, and Sunday logs
 
 ## Stack
 
-Next.js (App Router) + React + TypeScript + Clerk + Supabase + Anthropic Claude API
+Next.js (App Router) + React + TypeScript + Clerk + Supabase + OpenAI API
 
 ## Auth + cloud data
 
 See [AUTH_SETUP.md](./AUTH_SETUP.md) for Clerk + Supabase env vars and dashboard steps.
 
-## Mentor (Claude API)
+## Mentor (OpenAI API)
 
-Claude Pro on claude.ai does **not** unlock the API. Create an API key at [console.anthropic.com](https://console.anthropic.com/), enable billing, and set `ANTHROPIC_API_KEY` in Vercel (and locally in `.env.local`).
+Mentor and Chief of Staff share `OPENAI_API_KEY`. Create a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys), enable billing, and set it in Vercel (Production + Preview) and locally in `.env.local`.
 
-After each deep-work session, a debrief prompt captures feeling + tags. Journal photos can be bulk-uploaded; Claude Vision extracts text **and page dates** (e.g. “July 19th”) for backfill. Evening / Sunday journal steps require OCR. Body/energy logs, miss-day repair, horizon cascade (Vision → weekly goals → One Thing), debrief analytics, and one-click **Install** on mentor prescriptions (habit / One Thing / calendar / reminder) close the loop from insight → system.
+If you swapped Vercel or GitHub accounts, env vars do **not** follow the repo. Re-add `OPENAI_API_KEY` (and Clerk/Supabase/etc.) on the new Vercel project, then redeploy.
+
+After each deep-work session, a debrief prompt captures feeling + tags. Journal photos can be bulk-uploaded; OpenAI Vision extracts text **and page dates** (e.g. “July 19th”) for backfill. Evening / Sunday journal steps require OCR. Body/energy logs, miss-day repair, horizon cascade (Vision → weekly goals → One Thing), debrief analytics, and one-click **Install** on mentor prescriptions (habit / One Thing / calendar / reminder) close the loop from insight → system.
 
 ## Deploy (Vercel) — if you see “No Next.js version detected”
 

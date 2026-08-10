@@ -1,5 +1,5 @@
 /**
- * Smoke checks for mentor synthesis parsing (no Claude API needed).
+ * Smoke checks for mentor synthesis parsing (no OpenAI API needed).
  * Run: npx tsx scripts/check-mentor-synthesis.ts
  */
 import { clipMentorContext } from '../src/lib/mentor/clipContext'

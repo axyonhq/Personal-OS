@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  formatAnthropicError,
-  getAnthropicClient,
-  MENTOR_MODEL,
+  formatOpenAIError,
+  getMentorOpenAIClient,
+  MENTOR_OPENAI_MODEL,
   mentorNotConfiguredResponse,
-} from '@/lib/mentor/anthropic'
+} from '@/lib/mentor/openai'
 import {
   coerceJournalDateYear,
   extractDateFromJournalText,
@@ -74,7 +74,7 @@ function parseModelPayload(raw: string, now: Date): {
 
 export async function POST(req: NextRequest) {
   try {
-    const client = getAnthropicClient()
+    const client = getMentorOpenAIClient()
     if (!client) return mentorNotConfiguredResponse()
 
     const body = (await req.json()) as {
@@ -116,10 +116,8 @@ export async function POST(req: NextRequest) {
         ? body.currentYear
         : zonedParts(now).year
 
-    const response = await client.messages.create({
-      model: MENTOR_MODEL,
-      max_tokens: 2800,
-      system: `You extract handwritten or printed journal pages for a high-performance coaching system.
+    const data = imageBase64.replace(/^data:[^;]+;base64,/, '')
+    const system = `You extract handwritten or printed journal pages for a high-performance coaching system.
 
 Transcribe faithfully. Preserve line breaks for lists. Do not invent content you cannot read — mark illegible spots as [illegible].
 
@@ -132,17 +130,20 @@ Return ONLY valid JSON (no markdown fences):
   "detectedDate": "YYYY-MM-DD or null",
   "detectedDateRaw": "exactly what was written, e.g. July 19th",
   "text": "full transcription of the page"
-}`,
+}`
+
+    const response = await client.chat.completions.create({
+      model: MENTOR_OPENAI_MODEL,
+      max_completion_tokens: 2800,
       messages: [
+        { role: 'system', content: system },
         {
           role: 'user',
           content: [
             {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: imageBase64.replace(/^data:[^;]+;base64,/, ''),
+              type: 'image_url',
+              image_url: {
+                url: `data:${mediaType};base64,${data}`,
               },
             },
             {
@@ -161,11 +162,7 @@ Return ONLY valid JSON (no markdown fences):
       ],
     })
 
-    const raw = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim()
+    const raw = (response.choices[0]?.message?.content || '').trim()
 
     if (!raw) {
       return NextResponse.json({ error: 'No text extracted' }, { status: 502 })
@@ -183,6 +180,6 @@ Return ONLY valid JSON (no markdown fences):
     })
   } catch (error) {
     console.error('mentor journal failed', error)
-    return NextResponse.json({ error: formatAnthropicError(error) }, { status: 500 })
+    return NextResponse.json({ error: formatOpenAIError(error) }, { status: 500 })
   }
 }

@@ -12,7 +12,7 @@ export function openaiNotConfiguredResponse() {
   return Response.json(
     {
       error:
-        'OPENAI_API_KEY is not set. Add an OpenAI API key from platform.openai.com for Chief of Staff.',
+        'OPENAI_API_KEY is not set. Add an OpenAI API key from platform.openai.com (used by Chief of Staff and Mentor).',
       code: 'missing_api_key',
     },
     { status: 503 },

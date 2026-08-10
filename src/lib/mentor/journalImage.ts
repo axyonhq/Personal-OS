@@ -26,7 +26,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary)
 }
 
-/** Normalize uploads (incl. iPhone HEIC) to an Anthropic-supported image payload. */
+/** Normalize uploads (incl. iPhone HEIC) to a vision-API-supported image payload. */
 export async function prepareJournalImage(
   file: File,
 ): Promise<{ base64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' }> {

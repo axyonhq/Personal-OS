@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  formatAnthropicError,
-  getAnthropicClient,
-  MENTOR_MODEL,
+  formatOpenAIError,
+  getMentorOpenAIClient,
+  MENTOR_OPENAI_MODEL,
   mentorNotConfiguredResponse,
-} from '@/lib/mentor/anthropic'
+} from '@/lib/mentor/openai'
 import {
   MentorSynthesisTimeoutError,
   MENTOR_SYNTHESIS_TIMEOUT_MS,
@@ -12,12 +12,12 @@ import {
 } from '@/lib/mentor/runSynthesis'
 
 export const runtime = 'nodejs'
-/** Pro plan allows up to 300s; keep headroom above the in-process Claude budget. */
+/** Pro plan allows up to 300s; keep headroom above the in-process OpenAI budget. */
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
   try {
-    const client = getAnthropicClient({ timeout: MENTOR_SYNTHESIS_TIMEOUT_MS + 5_000 })
+    const client = getMentorOpenAIClient({ timeout: MENTOR_SYNTHESIS_TIMEOUT_MS + 5_000 })
     if (!client) return mentorNotConfiguredResponse()
 
     const body = (await req.json()) as { context?: string }
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         {
           error: error.message,
           code: 'synthesis_timeout',
-          model: MENTOR_MODEL,
+          model: MENTOR_OPENAI_MODEL,
         },
         { status: 504 },
       )
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
         ? (error as { stopReason?: string | null }).stopReason
         : null
     const message =
-      error instanceof Error ? error.message : formatAnthropicError(error)
+      error instanceof Error ? error.message : formatOpenAIError(error)
 
     const status = message.startsWith('Could not parse mentor synthesis') ? 502 : 500
     return NextResponse.json(
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
         error: message,
         raw: raw.slice(0, 500) || undefined,
         stop_reason: stopReason,
-        model: MENTOR_MODEL,
+        model: MENTOR_OPENAI_MODEL,
       },
       { status },
     )
