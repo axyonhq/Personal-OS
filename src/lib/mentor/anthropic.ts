@@ -46,10 +46,13 @@ export const MENTOR_SYNTHESIS_SCHEMA = {
   additionalProperties: false as const,
 }
 
-export function getAnthropicClient(): Anthropic | null {
+export function getAnthropicClient(options?: { timeout?: number }): Anthropic | null {
   const key = process.env.ANTHROPIC_API_KEY?.trim()
   if (!key) return null
-  return new Anthropic({ apiKey: key })
+  return new Anthropic({
+    apiKey: key,
+    ...(typeof options?.timeout === 'number' ? { timeout: options.timeout } : {}),
+  })
 }
 
 export function mentorNotConfiguredResponse() {

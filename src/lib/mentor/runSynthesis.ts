@@ -7,21 +7,15 @@ import {
 import { ANALYZE_JSON_INSTRUCTION, MENTOR_SYSTEM_PROMPT } from '@/lib/mentor/context'
 import {
   insightFromMessageContent,
-  normalizeInsight,
   parseInsightJson,
   type MentorInsightPayload,
 } from '@/lib/mentor/synthesis'
+import { clipMentorContext, MENTOR_CONTEXT_CHAR_LIMIT } from '@/lib/mentor/clipContext'
 
-/** Keep the dossier bounded so one Claude call finishes inside Vercel limits. */
-export const MENTOR_CONTEXT_CHAR_LIMIT = 60_000
+export { clipMentorContext, MENTOR_CONTEXT_CHAR_LIMIT }
 
-export function clipMentorContext(context: string, limit = MENTOR_CONTEXT_CHAR_LIMIT): string {
-  const trimmed = context.trim()
-  if (trimmed.length <= limit) return trimmed
-  const head = Math.floor(limit * 0.35)
-  const tail = limit - head - 80
-  return `${trimmed.slice(0, head)}\n\n[…dossier clipped for length…]\n\n${trimmed.slice(-tail)}`
-}
+/** Leave headroom under route maxDuration so we return JSON, not Vercel HTML. */
+export const MENTOR_SYNTHESIS_TIMEOUT_MS = 75_000
 
 const SYNTHESIS_TOOL: Anthropic.Tool = {
   name: 'submit_mentor_synthesis',
@@ -35,28 +29,7 @@ const SYNTHESIS_TOOL: Anthropic.Tool = {
   },
 }
 
-const JSON_SCHEMA_FORMAT = {
-  type: 'json_schema' as const,
-  schema: {
-    type: 'object' as const,
-    properties: MENTOR_SYNTHESIS_SCHEMA.properties,
-    required: [...MENTOR_SYNTHESIS_SCHEMA.required],
-    additionalProperties: false as const,
-  },
-}
-
-function insightFromUnknown(parsed: unknown, fallbackText = ''): MentorInsightPayload | null {
-  if (!parsed) return parseInsightJson(fallbackText)
-  if (typeof parsed === 'string') return parseInsightJson(parsed)
-  if (typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return normalizeInsight(parsed as Record<string, unknown>, fallbackText)
-  }
-  return null
-}
-
-function textFromContent(
-  content: Anthropic.ContentBlock[],
-): string {
+function textFromContent(content: Anthropic.ContentBlock[]): string {
   return content
     .map((b) => {
       if (b.type === 'text') return b.text
@@ -73,153 +46,111 @@ function insightFromResponse(response: Anthropic.Message): MentorInsightPayload 
   return parseInsightJson(textFromContent(response.content))
 }
 
-function isNonRetryableAnthropicError(error: unknown): boolean {
+function isTimeoutError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false
-  const err = error as {
-    status?: number
-    error?: { error?: { type?: string }; type?: string }
+  const err = error as { name?: string; message?: string; code?: string; status?: number }
+  if (err.name === 'AbortError') return true
+  if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED') return true
+  const msg = typeof err.message === 'string' ? err.message.toLowerCase() : ''
+  return (
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('aborted') ||
+    err.status === 408 ||
+    err.status === 504
+  )
+}
+
+export class MentorSynthesisTimeoutError extends Error {
+  constructor(message = 'Synthesis timed out. The dossier may be too large — try again in a moment.') {
+    super(message)
+    this.name = 'MentorSynthesisTimeoutError'
   }
-  const nested = err.error?.error || err.error
-  const type = nested && typeof nested === 'object' ? nested.type : undefined
-  if (err.status === 401 || type === 'authentication_error') return true
-  if (err.status === 403 || type === 'permission_error') return true
-  if (err.status === 404 || type === 'not_found_error') return true
-  if (err.status === 429 || type === 'rate_limit_error') return true
-  return false
 }
 
 export type MentorSynthesisResult = {
   insight: MentorInsightPayload
-  path: 'json_output' | 'tool_use'
+  path: 'tool_use'
   model: string
   stopReason: string | null
+  clipped: boolean
+  contextChars: number
 }
 
 /**
- * One primary Claude call (JSON schema output). If the account/model rejects
- * structured outputs, fall back to one forced tool call. Never chains 4 calls.
- * Uses messages.create (not .parse) so a client-side JSON hiccup cannot throw
- * away a usable model response.
+ * One Claude call only (forced strict tool). Streaming keeps the connection
+ * alive on long runs. No sequential fallbacks — those caused Vercel 504s.
  */
 export async function runMentorSynthesis(
   client: Anthropic,
   context: string,
+  options?: { timeoutMs?: number },
 ): Promise<MentorSynthesisResult> {
-  const clipped = clipMentorContext(context)
+  const timeoutMs = options?.timeoutMs ?? MENTOR_SYNTHESIS_TIMEOUT_MS
+  const clippedText = clipMentorContext(context)
+  const clipped = clippedText.length < context.trim().length
   const system = `${MENTOR_SYSTEM_PROMPT}\n\n${ANALYZE_JSON_INSTRUCTION}`
-  const userContent = `Run a full pattern synthesis on this operator. Be specific. Cite times of day, session shapes, breaks, spend, journals, and debrief feelings when the data supports it.\n\n${clipped}`
+  const userContent = `Run a full pattern synthesis on this operator. Be specific. Cite times of day, session shapes, breaks, spend, journals, and debrief feelings when the data supports it.\n\n${clippedText}`
 
-  let lastRaw = ''
-  let lastStop: string | null = null
-  let structuredErrorMessage = ''
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-  // Primary: grammar-constrained JSON (single call; retry only if truncated).
   try {
-    let response = await client.messages.create({
-      model: MENTOR_MODEL,
-      max_tokens: 6144,
-      system,
-      output_config: { format: JSON_SCHEMA_FORMAT },
-      messages: [{ role: 'user', content: userContent }],
-    })
-
-    lastStop = response.stop_reason
-    lastRaw = textFromContent(response.content)
-
-    if (response.stop_reason === 'max_tokens' && lastRaw.length > 40) {
-      response = await client.messages.create({
+    // Prefer streaming so proxies see bytes before the final tool payload.
+    const stream = client.messages.stream(
+      {
         model: MENTOR_MODEL,
-        max_tokens: 8192,
+        max_tokens: 4096,
         system,
-        output_config: { format: JSON_SCHEMA_FORMAT },
+        tools: [SYNTHESIS_TOOL],
+        tool_choice: { type: 'tool', name: 'submit_mentor_synthesis' },
         messages: [{ role: 'user', content: userContent }],
-      })
-      lastStop = response.stop_reason
-      lastRaw = textFromContent(response.content)
-    }
+      },
+      { signal: controller.signal },
+    )
+
+    const response = await stream.finalMessage()
+    const lastStop = response.stop_reason
+    const lastRaw = textFromContent(response.content)
 
     if (response.stop_reason === 'refusal') {
-      throw new Error('Claude refused to run synthesis on this dossier. Try again with less journal text.')
+      throw new Error(
+        'Claude refused to run synthesis on this dossier. Try again with less journal text.',
+      )
     }
 
-    const insight =
-      insightFromResponse(response) || insightFromUnknown(null, lastRaw)
+    const insight = insightFromResponse(response)
     if (insight) {
       return {
         insight,
-        path: 'json_output',
+        path: 'tool_use',
         model: MENTOR_MODEL,
         stopReason: lastStop,
+        clipped,
+        contextChars: clippedText.length,
       }
     }
 
-    // API accepted structured output but body was unusable — try tool once.
-    structuredErrorMessage = `empty/unparseable json_output (stop_reason=${lastStop || 'unknown'})`
-    console.warn('mentor synthesis json_output unusable; trying tool fallback', {
-      stopReason: lastStop,
-      rawPreview: lastRaw.slice(0, 200),
-    })
+    const detail = [
+      'Could not parse mentor synthesis',
+      lastStop ? `stop_reason=${lastStop}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+
+    const err = new Error(detail) as Error & { raw?: string; stopReason?: string | null }
+    err.raw = lastRaw.slice(0, 800)
+    err.stopReason = lastStop
+    throw err
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Claude refused')) {
-      throw error
+    if (error instanceof MentorSynthesisTimeoutError) throw error
+    if (error instanceof Error && error.message.startsWith('Claude refused')) throw error
+    if (error instanceof Error && error.message.startsWith('Could not parse')) throw error
+    if (isTimeoutError(error) || controller.signal.aborted) {
+      throw new MentorSynthesisTimeoutError()
     }
-    if (isNonRetryableAnthropicError(error)) {
-      throw new Error(formatAnthropicError(error))
-    }
-    structuredErrorMessage = formatAnthropicError(error)
-    console.warn('mentor synthesis json_output failed; trying tool fallback', error)
+    throw new Error(formatAnthropicError(error))
+  } finally {
+    clearTimeout(timer)
   }
-
-  // Fallback: one forced strict tool call (still Anthropic / Claude).
-  let response = await client.messages.create({
-    model: MENTOR_MODEL,
-    max_tokens: 6144,
-    system,
-    tools: [SYNTHESIS_TOOL],
-    tool_choice: { type: 'tool', name: 'submit_mentor_synthesis' },
-    messages: [{ role: 'user', content: userContent }],
-  })
-
-  lastStop = response.stop_reason
-  lastRaw = textFromContent(response.content)
-
-  if (response.stop_reason === 'max_tokens' && lastRaw.length > 40) {
-    response = await client.messages.create({
-      model: MENTOR_MODEL,
-      max_tokens: 8192,
-      system,
-      tools: [SYNTHESIS_TOOL],
-      tool_choice: { type: 'tool', name: 'submit_mentor_synthesis' },
-      messages: [{ role: 'user', content: userContent }],
-    })
-    lastStop = response.stop_reason
-    lastRaw = textFromContent(response.content)
-  }
-
-  if (response.stop_reason === 'refusal') {
-    throw new Error('Claude refused to run synthesis on this dossier. Try again with less journal text.')
-  }
-
-  const insight = insightFromResponse(response)
-  if (insight) {
-    return {
-      insight,
-      path: 'tool_use',
-      model: MENTOR_MODEL,
-      stopReason: lastStop,
-    }
-  }
-
-  const detail = [
-    'Could not parse mentor synthesis',
-    structuredErrorMessage ? `json_output: ${structuredErrorMessage}` : null,
-    lastStop ? `stop_reason=${lastStop}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-
-  const err = new Error(detail) as Error & { raw?: string; stopReason?: string | null }
-  err.raw = lastRaw.slice(0, 800)
-  err.stopReason = lastStop
-  throw err
 }
