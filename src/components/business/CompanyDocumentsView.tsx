@@ -114,11 +114,31 @@ export function CompanyDocumentsView({
     store.updateCompanyDocument(id, { title, content })
     savedTitleRef.current = title
     savedContentRef.current = content
+    draftRef.current = { ...draftRef.current, dirty: false, title, content }
     setDirty(false)
     setSavedFlash(true)
     if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current)
     savedFlashTimer.current = setTimeout(() => setSavedFlash(false), 1600)
     return true
+  }, [store])
+
+  // Autosave drafts into the store so cloud hydrate / refresh cannot drop them.
+  // Save button still works as an immediate flush + return to view.
+  useEffect(() => {
+    if (!isEditing || !dirty || !openId) return
+    const timer = window.setTimeout(() => {
+      saveActive()
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [isEditing, dirty, openId, draftTitle, draftContent, saveActive])
+
+  // Flush any pending draft on unmount (tab switch / leave) so it never regresses.
+  useEffect(() => {
+    return () => {
+      const { openId: id, title, content, dirty: isDirty, mode: currentMode } = draftRef.current
+      if (!id || currentMode !== 'edit' || !isDirty) return
+      store.updateCompanyDocument(id, { title, content })
+    }
   }, [store])
 
   const saveAndView = useCallback(() => {
@@ -210,6 +230,8 @@ export function CompanyDocumentsView({
     if (!pendingNav) return
     const nav = pendingNav
     setPendingNav(null)
+    // Clear before navigation/unmount so the flush effect does not re-save.
+    draftRef.current = { ...draftRef.current, dirty: false }
     setDirty(false)
     runNav(nav)
   }

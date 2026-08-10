@@ -1,4 +1,11 @@
-import type { ActiveTimer, AppState, FinanceLedger, RevolutCredentials, TimeEntry } from '@/types'
+import type {
+  ActiveTimer,
+  AppState,
+  CompanyDocument,
+  FinanceLedger,
+  RevolutCredentials,
+  TimeEntry,
+} from '@/types'
 import {
   loadRevolutAppSecret,
   loadRevolutRefreshToken,
@@ -42,8 +49,48 @@ export function pickActiveTimer(
 }
 
 /**
- * After preferRicherState picks a base snapshot, fold in sessions + live timers
- * from the other side so cloud hydrate cannot erase in-progress or just-finished work.
+ * Union company docs by id. When both sides have the same id, keep the newer
+ * updatedAt (and on a tie, the longer body) so cloud hydrate cannot roll back
+ * a just-saved document to an older snapshot.
+ */
+export function mergeCompanyDocuments(
+  a: CompanyDocument[] = [],
+  b: CompanyDocument[] = [],
+): CompanyDocument[] {
+  const map = new Map<string, CompanyDocument>()
+  for (const doc of a) {
+    if (doc?.id) map.set(doc.id, doc)
+  }
+  for (const doc of b) {
+    if (!doc?.id) continue
+    const prev = map.get(doc.id)
+    if (!prev) {
+      map.set(doc.id, doc)
+      continue
+    }
+    const prevAt = Date.parse(prev.updatedAt) || 0
+    const nextAt = Date.parse(doc.updatedAt) || 0
+    if (nextAt > prevAt) {
+      map.set(doc.id, doc)
+      continue
+    }
+    if (nextAt < prevAt) continue
+    // Tie on timestamp: prefer the richer body so a blank overwrite loses.
+    const prevLen = (prev.content?.length || 0) + (prev.title?.length || 0)
+    const nextLen = (doc.content?.length || 0) + (doc.title?.length || 0)
+    if (nextLen > prevLen) map.set(doc.id, doc)
+  }
+  return Array.from(map.values()).sort((x, y) => {
+    const xAt = Date.parse(x.updatedAt) || 0
+    const yAt = Date.parse(y.updatedAt) || 0
+    return yAt - xAt
+  })
+}
+
+/**
+ * After preferRicherState picks a base snapshot, fold in sessions, live timers,
+ * and company documents from the other side so cloud hydrate cannot erase
+ * in-progress work or roll docs back to an older body.
  *
  * timerMode:
  * - prefer-either: keep a timer if either side has one (default for local↔remote)
@@ -62,6 +109,7 @@ export function mergeSessionSafeState(
       timerMode === 'prefer-other'
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
+    companyDocuments: mergeCompanyDocuments(base.companyDocuments, other.companyDocuments),
   }
 }
 
@@ -126,6 +174,11 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     credentials +
     (state.weekIntention && state.weekIntention.length > 40 ? 2 : 0) +
     (state.companyDocuments?.length || 0) * 5 +
+    // Content weight so two snapshots with the same doc count still prefer
+    // the one that actually holds the saved text (not an empty/older body).
+    (state.companyDocuments?.reduce((n, d) => n + Math.min(d.content?.length || 0, 4000), 0) ||
+      0) /
+      200 +
     (state.companyIdeas?.length || 0) * 3 +
     (state.companyLogins?.length || 0) * 4 +
     (state.companyDecisions?.length || 0) * 4 +

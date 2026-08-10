@@ -1079,6 +1079,9 @@ export function useStore() {
   const [cloudSource, setCloudSource] = useState<'local' | 'remote' | null>(null)
   const skipNextCloudSave = useRef(false)
   const saveTimer = useRef<number | null>(null)
+  /** Coalesce overlapping cloud upserts so an older in-flight write cannot land last. */
+  const cloudSaveQueue = useRef<AppState | null>(null)
+  const cloudSaveTail = useRef<Promise<void>>(Promise.resolve())
   /** Latest in-memory state — cloud hydrate must not use a stale snapshot. */
   const stateRef = useRef(state)
   stateRef.current = state
@@ -1103,6 +1106,55 @@ export function useStore() {
       return payload
     },
     [userId, session],
+  )
+
+  /** Always write the newest queued snapshot; drop stale mid-flight payloads. */
+  const enqueueCloudSave = useCallback(
+    (next: AppState, onError?: (message: string) => void) => {
+      cloudSaveQueue.current = next
+      cloudSaveTail.current = cloudSaveTail.current
+        .catch(() => {
+          // Keep the chain alive after a prior failure.
+        })
+        .then(async () => {
+          while (cloudSaveQueue.current) {
+            const snapshot = cloudSaveQueue.current
+            cloudSaveQueue.current = null
+            try {
+              const saved = await upsertCloudState(snapshot)
+              // If the user edited while this write was in flight, fold that in
+              // and schedule another pass instead of clobbering memory.
+              const latest = withLocalRevolutCredentials(stateRef.current)
+              const merged = mergeSessionSafeState(saved, latest, {
+                timerMode: 'prefer-other',
+              })
+              const docsChanged =
+                JSON.stringify(merged.companyDocuments) !==
+                JSON.stringify(saved.companyDocuments)
+              const sessionsChanged =
+                JSON.stringify(merged.timeEntries) !== JSON.stringify(saved.timeEntries) ||
+                JSON.stringify(merged.activeTimer) !== JSON.stringify(saved.activeTimer)
+
+              if (docsChanged || sessionsChanged) {
+                cloudSaveQueue.current = merged
+                skipNextCloudSave.current = true
+                stateRef.current = merged
+                setState(merged)
+                continue
+              }
+
+              if (saved.revolutCredentials !== stateRef.current.revolutCredentials) {
+                skipNextCloudSave.current = true
+                stateRef.current = saved
+                setState(saved)
+              }
+            } catch (err) {
+              onError?.(err instanceof Error ? err.message : 'Cloud save failed')
+            }
+          }
+        })
+    },
+    [upsertCloudState],
   )
 
   // Load / seed cloud document once Clerk + Supabase are ready
@@ -1162,14 +1214,24 @@ export function useStore() {
           source = pick.source
         }
 
-        // Re-fold anything the user did during the network round-trip (finish, start, discard).
+        // Re-fold anything the user did during the network round-trip (finish, start, discard, docs).
         // Memory wins for the live timer so discard/finish are not undone.
         const latest = withLocalRevolutCredentials(stateRef.current)
         chosen = mergeSessionSafeState(chosen, latest, { timerMode: 'prefer-other' })
 
         // Always persist the chosen snapshot so browser data lands under this Clerk user
-        const saved = await upsertCloudState(chosen)
+        let saved = await upsertCloudState(chosen)
         if (cancelled) return
+
+        // Edits / doc saves that landed during the upsert must not be wiped, and must
+        // re-queue to cloud instead of being skipped by skipNextCloudSave.
+        const afterUpsert = withLocalRevolutCredentials(stateRef.current)
+        saved = mergeSessionSafeState(saved, afterUpsert, { timerMode: 'prefer-other' })
+        const needsFollowUpSave =
+          JSON.stringify(saved.companyDocuments) !==
+            JSON.stringify(chosen.companyDocuments) ||
+          JSON.stringify(saved.timeEntries) !== JSON.stringify(chosen.timeEntries) ||
+          JSON.stringify(saved.activeTimer) !== JSON.stringify(chosen.activeTimer)
 
         applyRevolutCredentialsToBrowser(saved.revolutCredentials)
         skipNextCloudSave.current = true
@@ -1177,6 +1239,9 @@ export function useStore() {
         setState(saved)
         setCloudSource(source)
         setCloudSync('ready')
+        if (needsFollowUpSave) {
+          enqueueCloudSave(saved, (message) => setCloudError(message))
+        }
       } catch (err) {
         if (cancelled) return
         setCloudError(err instanceof Error ? err.message : 'Cloud sync failed')
@@ -1187,7 +1252,7 @@ export function useStore() {
     return () => {
       cancelled = true
     }
-  }, [authLoaded, userId, session, upsertCloudState])
+  }, [authLoaded, userId, session, upsertCloudState, enqueueCloudSave])
 
   // Debounced cloud save after hydration
   useEffect(() => {
@@ -1200,23 +1265,13 @@ export function useStore() {
 
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
-      void upsertCloudState(state)
-        .then((saved) => {
-          if (saved.revolutCredentials !== state.revolutCredentials) {
-            skipNextCloudSave.current = true
-            stateRef.current = saved
-            setState(saved)
-          }
-        })
-        .catch((err) => {
-          setCloudError(err instanceof Error ? err.message : 'Cloud save failed')
-        })
+      enqueueCloudSave(state, (message) => setCloudError(message))
     }, 800)
 
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current)
     }
-  }, [state, cloudSync, userId, session, upsertCloudState])
+  }, [state, cloudSync, userId, session, enqueueCloudSave])
 
   const pushBrowserToCloud = useCallback(async () => {
     if (!isSupabaseConfigured()) {
