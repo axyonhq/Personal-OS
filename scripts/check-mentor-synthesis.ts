@@ -2,6 +2,7 @@
  * Smoke checks for mentor synthesis parsing (no Claude API needed).
  * Run: npx tsx scripts/check-mentor-synthesis.ts
  */
+import { clipMentorContext } from '../src/lib/mentor/runSynthesis'
 import {
   coerceToolInput,
   insightFromMessageContent,
@@ -79,5 +80,10 @@ assert(prose?.summary.includes('morning'), 'prose fallback')
 
 assert(coerceToolInput(null) === null, 'null input')
 assert(coerceToolInput({ a: 1 })?.a === 1, 'object input')
+
+const long = 'x'.repeat(80_000)
+const clipped = clipMentorContext(long, 1000)
+assert(clipped.length <= 1000, 'clip respects limit')
+assert(clipped.includes('clipped for length'), 'clip marks middle')
 
 console.log('mentor synthesis checks passed')

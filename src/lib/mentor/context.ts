@@ -208,7 +208,7 @@ function sessionLines(entries: TimeEntry[], limit = 40): string {
 
 /** Compact operating dossier for Claude — pattern recognition fuel. */
 export function buildMentorContext(state: AppState): string {
-  const entries = state.timeEntries
+  const entries = state.timeEntries || []
   const withDebrief = entries.filter((e) => e.debrief)
   const stats = computeSessionStats(entries)
   const pauseStats = computePauseStats(entries)
@@ -294,7 +294,7 @@ export function buildMentorContext(state: AppState): string {
     .filter(Boolean)
     .join('\n')
 
-  const oneThingToday = state.dailyOneThing[todayDateKey()] || '(unset)'
+  const oneThingToday = state.dailyOneThing?.[todayDateKey()] || '(unset)'
 
   return [
     `# OPERATOR DOSSIER (Bali / ${APP_TIMEZONE})`,
@@ -393,7 +393,7 @@ When analyzing, hunt for:
 
 Keep replies dense and usable. Prefer short sections with hard edges over essays.`
 
-export const ANALYZE_JSON_INSTRUCTION = `Return the full structured synthesis as JSON matching the required schema.
+export const ANALYZE_JSON_INSTRUCTION = `Return the full structured synthesis as JSON matching the required schema (or via the submit_mentor_synthesis tool when that tool is provided).
 Do not wrap it in markdown fences. Do not add extra keys.
 Fill every field with concrete, evidence-backed content from the dossier:
 - summary: 2-4 sentence read on how they currently operate

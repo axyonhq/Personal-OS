@@ -106,10 +106,21 @@ export function MentorView({ store }: { store: Store }) {
     })
 
     try {
+      let context = ''
+      try {
+        context = buildMentorContext(store.state)
+      } catch (contextErr) {
+        throw new Error(
+          contextErr instanceof Error
+            ? `Could not build mentor dossier: ${contextErr.message}`
+            : 'Could not build mentor dossier',
+        )
+      }
+
       const res = await fetch('/api/mentor/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: buildMentorContext(store.state) }),
+        body: JSON.stringify({ context }),
       })
       let data: {
         insight?: {
@@ -126,6 +137,11 @@ export function MentorView({ store }: { store: Store }) {
       try {
         data = (await res.json()) as typeof data
       } catch {
+        if (res.status === 504 || res.status === 408) {
+          throw new Error(
+            'Synthesis timed out. The dossier may be too large — try again in a moment.',
+          )
+        }
         throw new Error(
           res.ok
             ? 'Synthesis returned an unreadable response'
@@ -133,6 +149,12 @@ export function MentorView({ store }: { store: Store }) {
         )
       }
       if (!res.ok || !data.insight) {
+        if (res.status === 504 || res.status === 408) {
+          throw new Error(
+            data.error ||
+              'Synthesis timed out. The dossier may be too large — try again in a moment.',
+          )
+        }
         const detail = data.raw?.trim()
           ? `${data.error || 'Synthesis failed'} (${data.raw.slice(0, 160)}…)`
           : data.error
