@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  formatAnthropicError,
   getAnthropicClient,
   MENTOR_MODEL,
   mentorNotConfiguredResponse,
@@ -67,7 +68,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: text })
   } catch (error) {
     console.error('mentor chat failed', error)
-    const message = error instanceof Error ? error.message : 'Mentor chat failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatAnthropicError(error) }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  formatAnthropicError,
   getAnthropicClient,
   MENTOR_MODEL,
   mentorNotConfiguredResponse,
@@ -182,7 +183,6 @@ Return ONLY valid JSON (no markdown fences):
     })
   } catch (error) {
     console.error('mentor journal failed', error)
-    const message = error instanceof Error ? error.message : 'Journal extraction failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatAnthropicError(error) }, { status: 500 })
   }
 }

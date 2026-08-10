@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { jsonSchemaOutputFormat } from '@anthropic-ai/sdk/helpers/json-schema'
 import {
+  formatAnthropicError,
   getAnthropicClient,
   MENTOR_MODEL,
+  MENTOR_SYNTHESIS_SCHEMA,
   mentorNotConfiguredResponse,
 } from '@/lib/mentor/anthropic'
 import { ANALYZE_JSON_INSTRUCTION, MENTOR_SYSTEM_PROMPT } from '@/lib/mentor/context'
-import { insightFromMessageContent } from '@/lib/mentor/synthesis'
+import {
+  insightFromMessageContent,
+  normalizeInsight,
+  type MentorInsightPayload,
+} from '@/lib/mentor/synthesis'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -15,40 +22,19 @@ const SYNTHESIS_TOOL = {
   description: 'Submit the structured mentor pattern synthesis for this operator.',
   strict: true,
   input_schema: {
-    type: 'object' as const,
-    properties: {
-      summary: {
-        type: 'string',
-        description: '2-4 sentence read on how they currently operate',
-      },
-      weapons: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'What makes them lethal — specific, evidence-backed',
-      },
-      drags: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'What bleeds performance — specific, evidence-backed',
-      },
-      blindSpots: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Patterns they are likely missing',
-      },
-      prescriptions: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Concrete systems / rules / constraints to install',
-      },
-      chatReply: {
-        type: 'string',
-        description: 'Short mentor message for the chat thread summarizing the synthesis',
-      },
-    },
-    required: ['summary', 'weapons', 'drags', 'blindSpots', 'prescriptions', 'chatReply'],
-    additionalProperties: false,
+    ...MENTOR_SYNTHESIS_SCHEMA,
+    required: [...MENTOR_SYNTHESIS_SCHEMA.required],
   },
+}
+
+const OUTPUT_FORMAT = jsonSchemaOutputFormat({
+  ...MENTOR_SYNTHESIS_SCHEMA,
+  required: [...MENTOR_SYNTHESIS_SCHEMA.required],
+} as const)
+
+function insightFromParsed(parsed: unknown): MentorInsightPayload | null {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  return normalizeInsight(parsed as Record<string, unknown>)
 }
 
 export async function POST(req: NextRequest) {
@@ -62,34 +48,74 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Context required' }, { status: 400 })
     }
 
-    const createParams = {
-      model: MENTOR_MODEL,
-      max_tokens: 4096,
-      system: `${MENTOR_SYSTEM_PROMPT}\n\n${ANALYZE_JSON_INSTRUCTION}`,
-      tools: [SYNTHESIS_TOOL],
-      tool_choice: { type: 'tool' as const, name: 'submit_mentor_synthesis' },
-      messages: [
-        {
-          role: 'user' as const,
-          content: `Run a full pattern synthesis on this operator. Be specific. Cite times of day, session shapes, breaks, spend, journals, and debrief feelings when the data supports it.\n\n${context}`,
-        },
-      ],
-    }
+    const system = `${MENTOR_SYSTEM_PROMPT}\n\n${ANALYZE_JSON_INSTRUCTION}`
+    const userContent = `Run a full pattern synthesis on this operator. Be specific. Cite times of day, session shapes, breaks, spend, journals, and debrief feelings when the data supports it.\n\n${context}`
 
-    let response = await client.messages.create(createParams)
+    let insight: MentorInsightPayload | null = null
+    let raw = ''
+    let stopReason: string | null = null
+    let path: 'json_output' | 'tool_use' = 'json_output'
 
-    // Truncated tool JSON is useless — one retry with more room.
-    if (response.stop_reason === 'max_tokens') {
-      response = await client.messages.create({
-        ...createParams,
-        max_tokens: 8192,
+    // Primary path: Claude JSON structured outputs (grammar-constrained).
+    try {
+      let response = await client.messages.parse({
+        model: MENTOR_MODEL,
+        max_tokens: 4096,
+        system,
+        output_config: { format: OUTPUT_FORMAT },
+        messages: [{ role: 'user', content: userContent }],
       })
+
+      if (response.stop_reason === 'max_tokens') {
+        response = await client.messages.parse({
+          model: MENTOR_MODEL,
+          max_tokens: 8192,
+          system,
+          output_config: { format: OUTPUT_FORMAT },
+          messages: [{ role: 'user', content: userContent }],
+        })
+      }
+
+      stopReason = response.stop_reason
+      insight = insightFromParsed(response.parsed_output)
+      if (!insight) {
+        insight = insightFromMessageContent(response.content)
+      }
+      raw = response.content
+        .map((b) => (b.type === 'text' ? b.text : ''))
+        .join('\n')
+        .trim()
+    } catch (structuredError) {
+      console.warn('mentor analyze structured output failed; trying tool fallback', structuredError)
+      path = 'tool_use'
     }
 
-    const insight = insightFromMessageContent(response.content)
-
+    // Fallback: forced Claude tool call (same schema, still Anthropic).
     if (!insight) {
-      const raw = response.content
+      path = 'tool_use'
+      let response = await client.messages.create({
+        model: MENTOR_MODEL,
+        max_tokens: 4096,
+        system,
+        tools: [SYNTHESIS_TOOL],
+        tool_choice: { type: 'tool' as const, name: 'submit_mentor_synthesis' },
+        messages: [{ role: 'user' as const, content: userContent }],
+      })
+
+      if (response.stop_reason === 'max_tokens') {
+        response = await client.messages.create({
+          model: MENTOR_MODEL,
+          max_tokens: 8192,
+          system,
+          tools: [SYNTHESIS_TOOL],
+          tool_choice: { type: 'tool' as const, name: 'submit_mentor_synthesis' },
+          messages: [{ role: 'user' as const, content: userContent }],
+        })
+      }
+
+      stopReason = response.stop_reason
+      insight = insightFromMessageContent(response.content)
+      raw = response.content
         .map((b) =>
           b.type === 'text'
             ? b.text
@@ -99,20 +125,24 @@ export async function POST(req: NextRequest) {
         )
         .join('\n')
         .trim()
+    }
+
+    if (!insight) {
       return NextResponse.json(
         {
           error: 'Could not parse mentor synthesis',
           raw: raw.slice(0, 500),
-          stop_reason: response.stop_reason,
+          stop_reason: stopReason,
+          path,
+          model: MENTOR_MODEL,
         },
         { status: 502 },
       )
     }
 
-    return NextResponse.json({ insight })
+    return NextResponse.json({ insight, model: MENTOR_MODEL, path })
   } catch (error) {
     console.error('mentor analyze failed', error)
-    const message = error instanceof Error ? error.message : 'Mentor analysis failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatAnthropicError(error) }, { status: 500 })
   }
 }
