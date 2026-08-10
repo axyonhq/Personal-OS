@@ -3666,8 +3666,13 @@ body:has(.gate-shell)::before {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
 }
 
-.company-todo-energy.platform-select {
+.company-todo-energy.platform-select,
+.company-todo-estimate.platform-select {
   min-width: 5.5rem;
+}
+
+.company-todo-estimate.platform-select {
+  min-width: 6.25rem;
 }
 
 .company-deadline-editor {

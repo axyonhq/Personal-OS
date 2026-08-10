@@ -105,6 +105,12 @@ async function loadCompanyTasks(userId: string): Promise<CompanyTask[]> {
       row.energy_required === 'little'
         ? (row.energy_required as CompanyTask['energyRequired'])
         : null,
+    estimateHours:
+      row.estimate_hours === null || row.estimate_hours === undefined
+        ? null
+        : Number(row.estimate_hours) > 0
+          ? Number(row.estimate_hours)
+          : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     blockedByIds: [],

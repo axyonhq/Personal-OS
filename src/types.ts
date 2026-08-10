@@ -511,6 +511,8 @@ export interface CompanyTask {
   deadline: string | null
   /** Focus energy this task needs; null means unset */
   energyRequired: CompanyTaskEnergy | null
+  /** How many hours you think this task will take; null means unset */
+  estimateHours: number | null
   createdAt: string
   updatedAt: string
   /** Task IDs that must be done before this one can proceed */

@@ -20,6 +20,7 @@ type TaskRow = {
   hidden: boolean | null
   deadline: string | null
   energy_required: string | null
+  estimate_hours: number | string | null
   created_at: string
   updated_at: string
 }
@@ -33,6 +34,13 @@ const ENERGY_VALUES: Record<string, CompanyTaskEnergy> = {
 function normalizeEnergy(raw: string | null | undefined): CompanyTaskEnergy | null {
   if (!raw) return null
   return ENERGY_VALUES[raw] ?? null
+}
+
+function normalizeEstimateHours(raw: number | string | null | undefined): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
 }
 
 const LEGACY_PRIORITY: Record<string, EisenhowerQuadrant> = {
@@ -62,6 +70,7 @@ function mapTask(row: TaskRow, blockedByIds: string[]): CompanyTask {
     hidden: Boolean(row.hidden),
     deadline: row.deadline ?? null,
     energyRequired: normalizeEnergy(row.energy_required),
+    estimateHours: normalizeEstimateHours(row.estimate_hours),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     blockedByIds,
@@ -174,6 +183,7 @@ export async function updateCompanyTask(
     hidden: boolean
     deadline: string | null
     energyRequired: CompanyTaskEnergy | null
+    estimateHours: number | null
   }>,
 ): Promise<void> {
   const client = createClerkSupabaseClient(() => session.getToken())
@@ -188,6 +198,7 @@ export async function updateCompanyTask(
   if (typeof patch.hidden === 'boolean') updates.hidden = patch.hidden
   if (patch.deadline !== undefined) updates.deadline = patch.deadline || null
   if (patch.energyRequired !== undefined) updates.energy_required = patch.energyRequired
+  if (patch.estimateHours !== undefined) updates.estimate_hours = patch.estimateHours
 
   if (Object.keys(updates).length > 1) {
     const { error } = await client.from('company_tasks').update(updates).eq('id', taskId)

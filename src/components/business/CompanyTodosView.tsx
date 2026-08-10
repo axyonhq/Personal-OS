@@ -40,6 +40,35 @@ const ENERGY_OPTIONS = [
   { value: 'little', label: 'Little' },
 ]
 
+const ESTIMATE_OPTIONS = [
+  { value: '', label: 'Time' },
+  { value: '1', label: '1 hour' },
+  { value: '2', label: '2 hours' },
+  { value: '3', label: '3 hours' },
+  { value: '4', label: '4 hours' },
+  { value: '6', label: '6 hours' },
+  { value: '8', label: '8 hours' },
+  { value: '10', label: '10 hours' },
+  { value: '12', label: '12 hours' },
+  { value: '16', label: '16 hours' },
+  { value: '20', label: '20 hours' },
+  { value: '24', label: '24 hours' },
+]
+
+function estimateSelectValue(hours: number | null): string {
+  if (hours == null) return ''
+  const match = ESTIMATE_OPTIONS.find((o) => o.value === String(hours))
+  if (match) return match.value
+  return String(hours)
+}
+
+function estimateOptionsFor(hours: number | null) {
+  const value = estimateSelectValue(hours)
+  if (!value || ESTIMATE_OPTIONS.some((o) => o.value === value)) return ESTIMATE_OPTIONS
+  const label = Number(value) === 1 ? '1 hour' : `${value} hours`
+  return [...ESTIMATE_OPTIONS, { value, label }]
+}
+
 function compareBySortOrder(a: CompanyTask, b: CompanyTask) {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
   return a.createdAt.localeCompare(b.createdAt)
@@ -235,6 +264,19 @@ export function CompanyTodosView() {
       await updateCompanyTask(session, task.id, { energyRequired: next })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update energy')
+      await refresh()
+    }
+  }
+
+  async function setTaskEstimate(task: CompanyTask, next: number | null) {
+    if (!session) return
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, estimateHours: next } : t)),
+    )
+    try {
+      await updateCompanyTask(session, task.id, { estimateHours: next })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update time estimate')
       await refresh()
     }
   }
@@ -522,6 +564,14 @@ export function CompanyTodosView() {
               onChange={(v) => void setTaskEnergy(task, (v || null) as CompanyTaskEnergy | null)}
               disabled={task.hidden}
             />
+            <Select
+              className="company-todo-select company-todo-estimate"
+              value={estimateSelectValue(task.estimateHours)}
+              ariaLabel="Time estimate"
+              options={estimateOptionsFor(task.estimateHours)}
+              onChange={(v) => void setTaskEstimate(task, v ? Number(v) : null)}
+              disabled={task.hidden}
+            />
             {!task.hidden && (
               <button
                 type="button"
@@ -730,6 +780,13 @@ export function CompanyTodosView() {
                 onChange={(v) =>
                   void setTaskEnergy(openTask, (v || null) as CompanyTaskEnergy | null)
                 }
+              />
+              <Select
+                className="company-todo-select company-todo-estimate"
+                value={estimateSelectValue(openTask.estimateHours)}
+                ariaLabel="Time estimate"
+                options={estimateOptionsFor(openTask.estimateHours)}
+                onChange={(v) => void setTaskEstimate(openTask, v ? Number(v) : null)}
               />
               <button
                 type="button"
