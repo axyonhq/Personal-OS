@@ -5,6 +5,7 @@
 import {
   mergeFinanceLedgers,
   mergeSessionSafeState,
+  preferRicherState,
 } from '../src/lib/supabase/sync'
 import type { AppState, FinanceLedger } from '../src/types'
 import { createSeedState } from '../src/data/seed'
@@ -52,6 +53,8 @@ assert(
 )
 
 const base = createSeedState() as AppState
+
+// Company expense added while cloud hydrate is in flight must survive.
 const remoteHeavy: AppState = {
   ...base,
   timeEntries: Array.from({ length: 20 }, (_, i) => ({
@@ -60,17 +63,59 @@ const remoteHeavy: AppState = {
     date: '2026-08-01',
     minutes: 45,
   })),
-  personalFinance: older,
+  companyFinance: ledger({
+    categories: [
+      { id: 'bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
+    ],
+  }),
 }
-const localLight: AppState = {
+const localWithMicrosoft: AppState = {
   ...base,
-  personalFinance: newer,
+  companyFinance: ledger({
+    categories: [
+      { id: 'bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
+      {
+        id: 'ms-email',
+        name: 'Microsoft emails',
+        frequency: 'monthly',
+        amount: 72,
+      },
+    ],
+    updatedAt: '2026-08-11T14:00:00.000Z',
+  }),
 }
 
-const folded = mergeSessionSafeState(remoteHeavy, localLight, { timerMode: 'prefer-other' })
+const pick = preferRicherState(localWithMicrosoft, remoteHeavy)
+assert(pick.source === 'remote', 'remote should win overall richness in this fixture')
+const afterPick = mergeSessionSafeState(
+  pick.winner,
+  pick.source === 'local' ? remoteHeavy : localWithMicrosoft,
+)
 assert(
-  folded.personalFinance.categories.find((c) => c.id === 'food')?.amount === 250,
-  'mergeSessionSafeState must keep newer finance amounts when remote is richer elsewhere',
+  afterPick.companyFinance.categories.some((c) => c.name === 'Microsoft emails'),
+  'prefer-either fold must keep company expense from the richer finance side',
+)
+
+const afterHydrate = mergeSessionSafeState(remoteHeavy, localWithMicrosoft, {
+  timerMode: 'prefer-other',
+})
+assert(
+  afterHydrate.companyFinance.categories.some((c) => c.name === 'Microsoft emails'),
+  'prefer-other must keep just-added company expense from memory',
+)
+assert(
+  afterHydrate.companyFinance.categories.find((c) => c.id === 'ms-email')?.amount === 72,
+  'company expense amount must survive hydrate fold',
+)
+
+const foldedPersonal = mergeSessionSafeState(
+  { ...remoteHeavy, personalFinance: older },
+  { ...localWithMicrosoft, personalFinance: newer },
+  { timerMode: 'prefer-other' },
+)
+assert(
+  foldedPersonal.personalFinance.categories.find((c) => c.id === 'food')?.amount === 250,
+  'mergeSessionSafeState prefer-other must keep newer personal finance too',
 )
 
 // Food & Drink migration must not force $185 after the user edits the combined row.

@@ -112,11 +112,12 @@ export function mergeFinanceLedgers(
 /**
  * After preferRicherState picks a base snapshot, fold in sessions, live timers,
  * company documents, and finance ledgers from the other side so cloud hydrate
- * cannot erase in-progress work or roll amounts back to an older body.
+ * cannot erase in-progress work or roll amounts / new expenses back.
  *
  * timerMode:
  * - prefer-either: keep a timer if either side has one (default for local↔remote)
- * - prefer-other: other is authoritative (use after hydrate so discard/finish stick)
+ * - prefer-other: other is authoritative (use after hydrate so discard/finish /
+ *   just-added company expenses stick)
  */
 export function mergeSessionSafeState(
   base: AppState,
@@ -124,7 +125,17 @@ export function mergeSessionSafeState(
   options?: { timerMode?: 'prefer-either' | 'prefer-other' },
 ): AppState {
   const timerMode = options?.timerMode ?? 'prefer-either'
-  const preferOtherOnTie = timerMode === 'prefer-other'
+  // After hydrate/save, memory is the source of truth for finance — a richer
+  // remote snapshot must not delete a company expense you just added
+  // (e.g. "Microsoft emails").
+  const personalFinance =
+    timerMode === 'prefer-other'
+      ? other.personalFinance
+      : mergeFinanceLedgers(base.personalFinance, other.personalFinance)
+  const companyFinance =
+    timerMode === 'prefer-other'
+      ? other.companyFinance
+      : mergeFinanceLedgers(base.companyFinance, other.companyFinance)
   return {
     ...base,
     timeEntries: mergeTimeEntries(base.timeEntries, other.timeEntries),
@@ -133,12 +144,8 @@ export function mergeSessionSafeState(
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
     companyDocuments: mergeCompanyDocuments(base.companyDocuments, other.companyDocuments),
-    personalFinance: mergeFinanceLedgers(base.personalFinance, other.personalFinance, {
-      preferOtherOnTie,
-    }),
-    companyFinance: mergeFinanceLedgers(base.companyFinance, other.companyFinance, {
-      preferOtherOnTie,
-    }),
+    personalFinance,
+    companyFinance,
   }
 }
 
