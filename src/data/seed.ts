@@ -10,6 +10,10 @@ import {
 import { EMPTY_AUTOPILOT_COMPLETIONS } from '../types'
 import { emptyFinanceLedger } from '../utils/finance'
 import { parseDateKey, startOfWeekMonday, todayDateKey, todayMonthKey } from '../utils/time'
+import {
+  buildOutlookColdEmailDomains,
+  COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
+} from './coldEmailOutlookCatalog'
 
 export const PROJECTS: Project[] = [
   { id: 'chase', name: 'Chase Build', color: '#5aa889' },
@@ -260,7 +264,8 @@ export function createSeedState(): AppState {
     companyIdeas: [],
     companyLogins: [],
     companyDecisions: [],
-    coldEmailDomains: [],
+    coldEmailDomains: buildOutlookColdEmailDomains(),
+    coldEmailCatalogVersion: COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
     mentor: emptyMentorState(),
     chiefOfStaff: emptyChiefOfStaffState(),
   }
