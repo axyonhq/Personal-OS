@@ -12,6 +12,7 @@ import {
 import {
   applyRevolutCredentialsToBrowser,
   isThinCloudPayload,
+  mergeFinanceLedgers,
   mergeRevolutCredentials,
   mergeSessionSafeState,
   preferRicherState,
@@ -673,6 +674,7 @@ function migrateLedger(raw: Partial<FinanceLedger> | undefined, fallback: Financ
     allocations: Array.isArray(raw.allocations) ? raw.allocations : [],
     spends: Array.isArray(raw.spends) ? raw.spends : [],
     wishlist: migrateWishlist(raw.wishlist),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : fallback.updatedAt,
   }
 }
 
@@ -690,14 +692,13 @@ function isRichLedger(ledger: FinanceLedger): boolean {
 }
 
 function preferRicherLedger(current: FinanceLedger, candidate: FinanceLedger): FinanceLedger {
-  if (!isRichLedger(current) && isRichLedger(candidate)) return candidate
-  if (candidate.categories.length > current.categories.length) return candidate
-  return current
+  return mergeFinanceLedgers(current, candidate)
 }
 
 function readFinanceBackup(): {
   personalFinance?: FinanceLedger
   companyFinance?: FinanceLedger
+  savedAt?: number
 } | null {
   try {
     const raw = localStorage.getItem(FINANCE_BACKUP_KEY)
@@ -705,6 +706,7 @@ function readFinanceBackup(): {
     return JSON.parse(raw) as {
       personalFinance?: FinanceLedger
       companyFinance?: FinanceLedger
+      savedAt?: number
     }
   } catch {
     return null
@@ -725,6 +727,14 @@ function writeFinanceBackup(personal: FinanceLedger, company: FinanceLedger) {
   } catch {
     // ignore quota errors
   }
+}
+
+function withBackupTimestamp(
+  ledger: FinanceLedger,
+  savedAt: number | undefined,
+): FinanceLedger {
+  if (ledger.updatedAt || !savedAt) return ledger
+  return { ...ledger, updatedAt: new Date(savedAt).toISOString() }
 }
 
 function migrateRevolutSync(
@@ -933,11 +943,17 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     if (backup) {
       personalFinance = preferRicherLedger(
         personalFinance,
-        migrateLedger(backup.personalFinance, seed.personalFinance),
+        withBackupTimestamp(
+          migrateLedger(backup.personalFinance, seed.personalFinance),
+          backup.savedAt,
+        ),
       )
       companyFinance = preferRicherLedger(
         companyFinance,
-        migrateLedger(backup.companyFinance, seed.companyFinance),
+        withBackupTimestamp(
+          migrateLedger(backup.companyFinance, seed.companyFinance),
+          backup.savedAt,
+        ),
       )
     }
   }
@@ -1150,8 +1166,13 @@ export function useStore() {
               const sessionsChanged =
                 JSON.stringify(merged.timeEntries) !== JSON.stringify(saved.timeEntries) ||
                 JSON.stringify(merged.activeTimer) !== JSON.stringify(saved.activeTimer)
+              const financeChanged =
+                JSON.stringify(merged.personalFinance) !==
+                  JSON.stringify(saved.personalFinance) ||
+                JSON.stringify(merged.companyFinance) !==
+                  JSON.stringify(saved.companyFinance)
 
-              if (docsChanged || sessionsChanged) {
+              if (docsChanged || sessionsChanged || financeChanged) {
                 cloudSaveQueue.current = merged
                 skipNextCloudSave.current = true
                 stateRef.current = merged
@@ -1247,7 +1268,10 @@ export function useStore() {
           JSON.stringify(saved.companyDocuments) !==
             JSON.stringify(chosen.companyDocuments) ||
           JSON.stringify(saved.timeEntries) !== JSON.stringify(chosen.timeEntries) ||
-          JSON.stringify(saved.activeTimer) !== JSON.stringify(chosen.activeTimer)
+          JSON.stringify(saved.activeTimer) !== JSON.stringify(chosen.activeTimer) ||
+          JSON.stringify(saved.personalFinance) !==
+            JSON.stringify(chosen.personalFinance) ||
+          JSON.stringify(saved.companyFinance) !== JSON.stringify(chosen.companyFinance)
 
         applyRevolutCredentialsToBrowser(saved.revolutCredentials)
         skipNextCloudSave.current = true
@@ -1343,7 +1367,16 @@ export function useStore() {
   const patchLedger = useCallback(
     (realm: FinanceRealm, fn: (ledger: FinanceLedger) => FinanceLedger) => {
       const key = ledgerKey(realm)
-      update((s) => ({ ...s, [key]: fn(s[key]) }))
+      update((s) => {
+        const next = fn(s[key])
+        return {
+          ...s,
+          [key]: {
+            ...next,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      })
     },
     [update],
   )

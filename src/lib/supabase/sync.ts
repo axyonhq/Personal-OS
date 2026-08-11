@@ -88,13 +88,36 @@ export function mergeCompanyDocuments(
 }
 
 /**
+ * Prefer the newer finance ledger when updatedAt exists; else the richer
+ * structure. preferOtherOnTie keeps in-memory edits after hydrate/save.
+ */
+export function mergeFinanceLedgers(
+  base: FinanceLedger,
+  other: FinanceLedger,
+  options?: { preferOtherOnTie?: boolean },
+): FinanceLedger {
+  const baseAt = Date.parse(base?.updatedAt || '') || 0
+  const otherAt = Date.parse(other?.updatedAt || '') || 0
+  if (otherAt > baseAt) return other
+  if (baseAt > otherAt) return base
+
+  const baseScore = ledgerScore(base)
+  const otherScore = ledgerScore(other)
+  if (otherScore > baseScore) return other
+  if (baseScore > otherScore) return base
+
+  return options?.preferOtherOnTie ? other : base
+}
+
+/**
  * After preferRicherState picks a base snapshot, fold in sessions, live timers,
- * and company documents from the other side so cloud hydrate cannot erase
- * in-progress work or roll docs back to an older body.
+ * company documents, and finance ledgers from the other side so cloud hydrate
+ * cannot erase in-progress work or roll amounts / new expenses back.
  *
  * timerMode:
  * - prefer-either: keep a timer if either side has one (default for local↔remote)
- * - prefer-other: other is authoritative (use after hydrate so discard/finish stick)
+ * - prefer-other: other is authoritative (use after hydrate so discard/finish /
+ *   just-added company expenses stick)
  */
 export function mergeSessionSafeState(
   base: AppState,
@@ -102,6 +125,17 @@ export function mergeSessionSafeState(
   options?: { timerMode?: 'prefer-either' | 'prefer-other' },
 ): AppState {
   const timerMode = options?.timerMode ?? 'prefer-either'
+  // After hydrate/save, memory is the source of truth for finance — a richer
+  // remote snapshot must not delete a company expense you just added
+  // (e.g. "Microsoft emails").
+  const personalFinance =
+    timerMode === 'prefer-other'
+      ? other.personalFinance
+      : mergeFinanceLedgers(base.personalFinance, other.personalFinance)
+  const companyFinance =
+    timerMode === 'prefer-other'
+      ? other.companyFinance
+      : mergeFinanceLedgers(base.companyFinance, other.companyFinance)
   return {
     ...base,
     timeEntries: mergeTimeEntries(base.timeEntries, other.timeEntries),
@@ -110,6 +144,8 @@ export function mergeSessionSafeState(
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
     companyDocuments: mergeCompanyDocuments(base.companyDocuments, other.companyDocuments),
+    personalFinance,
+    companyFinance,
   }
 }
 
