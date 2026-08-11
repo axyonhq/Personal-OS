@@ -1,5 +1,9 @@
 import { useAuth, useSession } from '@clerk/nextjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  buildOutlookColdEmailDomains,
+  COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
+} from '../data/coldEmailOutlookCatalog'
 import { createSeedState, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
@@ -938,6 +942,17 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     }
   }
 
+  const priorColdEmailCatalogVersion =
+    typeof parsed.coldEmailCatalogVersion === 'number' ? parsed.coldEmailCatalogVersion : 0
+  const coldEmailCatalogNeedsReplace =
+    priorColdEmailCatalogVersion < COLD_EMAIL_OUTLOOK_CATALOG_VERSION
+  const coldEmailDomains = coldEmailCatalogNeedsReplace
+    ? buildOutlookColdEmailDomains()
+    : migrateColdEmailDomains(parsed.coldEmailDomains, seed.coldEmailDomains)
+  const coldEmailCatalogVersion = coldEmailCatalogNeedsReplace
+    ? COLD_EMAIL_OUTLOOK_CATALOG_VERSION
+    : priorColdEmailCatalogVersion
+
   return {
     ...seed,
     ...parsed,
@@ -1045,7 +1060,8 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           .filter((row): row is CompanyLogin => row != null)
       : seed.companyLogins,
     companyDecisions: migrateCompanyDecisions(parsed.companyDecisions, seed.companyDecisions),
-    coldEmailDomains: migrateColdEmailDomains(parsed.coldEmailDomains, seed.coldEmailDomains),
+    coldEmailDomains,
+    coldEmailCatalogVersion,
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
@@ -2765,6 +2781,7 @@ export function useStore() {
         companyLogins: s.companyLogins,
         companyDecisions: s.companyDecisions,
         coldEmailDomains: s.coldEmailDomains,
+        coldEmailCatalogVersion: s.coldEmailCatalogVersion,
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,

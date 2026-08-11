@@ -678,6 +678,11 @@ export interface AppState {
   companyDecisions: CompanyDecision[]
   /** AXYON Cold Email — sending domains + mailboxes */
   coldEmailDomains: ColdEmailDomain[]
+  /**
+   * Catalog wipe version for cold email domains.
+   * Bump COLD_EMAIL_OUTLOOK_CATALOG_VERSION to force a one-time replace.
+   */
+  coldEmailCatalogVersion?: number
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
   /** AXYON Chief of Staff — platform-wide briefs + chat */
