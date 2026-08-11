@@ -581,6 +581,8 @@ export interface FinanceLedger {
   spends: SpendEntry[]
   /** Personal spendings wishlist (item + rough price) */
   wishlist: WishlistItem[]
+  /** Bumped on every finance edit so cloud hydrate cannot roll amounts back. */
+  updatedAt?: string
 }
 
 /** Pending Revolut row awaiting categorize / discard in a finance realm. */
