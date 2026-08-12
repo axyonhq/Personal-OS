@@ -1,6 +1,6 @@
 import { useAuth, useSession } from '@clerk/nextjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createSeedState, PROJECTS, uid } from '../data/seed'
+import { createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
   isSupabaseConfigured,
@@ -104,6 +104,8 @@ function migrateActiveTimer(raw: unknown): ActiveTimer | null {
   if (!raw || typeof raw !== 'object') return null
   const t = raw as Partial<ActiveTimer>
   if (!t.projectId || typeof t.startedAt !== 'number') return null
+  // Drop zombie timers with unknown project ids (would crash the overlay).
+  if (!PROJECT_MAP[t.projectId as ProjectId]) return null
   const sessionStartedAt =
     typeof t.sessionStartedAt === 'number' ? t.sessionStartedAt : t.startedAt
   const targetMinutes =
@@ -111,7 +113,7 @@ function migrateActiveTimer(raw: unknown): ActiveTimer | null {
       ? Math.round(t.targetMinutes)
       : undefined
   return {
-    projectId: t.projectId,
+    projectId: t.projectId as ProjectId,
     startedAt: t.startedAt,
     sessionStartedAt,
     focusNote: typeof t.focusNote === 'string' ? t.focusNote : '',
