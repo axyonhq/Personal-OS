@@ -1,5 +1,4 @@
 import {
-  emptyChiefOfStaffState,
   emptyMentorState,
   type AppState,
   type Project,
@@ -10,10 +9,6 @@ import {
 import { EMPTY_AUTOPILOT_COMPLETIONS } from '../types'
 import { emptyFinanceLedger } from '../utils/finance'
 import { parseDateKey, startOfWeekMonday, todayDateKey, todayMonthKey } from '../utils/time'
-import {
-  buildOutlookColdEmailDomains,
-  COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
-} from './coldEmailOutlookCatalog'
 
 export const PROJECTS: Project[] = [
   { id: 'chase', name: 'Chase Build', color: '#5aa889' },
@@ -85,7 +80,6 @@ function sessionEntry(
 
 export function createSeedState(): AppState {
   const personalBillsId = uid('cat')
-  const companyBillsId = uid('cat')
   const today = todayDateKey()
   return {
     selectedDate: today,
@@ -251,22 +245,12 @@ export function createSeedState(): AppState {
     lastSaturdayDumpSunday: null,
     autopilotCompletions: { ...EMPTY_AUTOPILOT_COMPLETIONS },
     personalFinance: emptyFinanceLedger(personalBillsId),
-    companyFinance: emptyFinanceLedger(companyBillsId),
     revolutSync: {
       personalAccountIds: [],
-      companyAccountIds: [],
       personalQueue: [],
-      companyQueue: [],
       settledIds: [],
     },
     visionGoals: [],
-    companyDocuments: [],
-    companyIdeas: [],
-    companyLogins: [],
-    companyDecisions: [],
-    coldEmailDomains: buildOutlookColdEmailDomains(),
-    coldEmailCatalogVersion: COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
     mentor: emptyMentorState(),
-    chiefOfStaff: emptyChiefOfStaffState(),
   }
 }

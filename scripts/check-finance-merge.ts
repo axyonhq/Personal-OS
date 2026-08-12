@@ -54,7 +54,7 @@ assert(
 
 const base = createSeedState() as AppState
 
-// Company expense added while cloud hydrate is in flight must survive.
+// Personal expense added while cloud hydrate is in flight must survive.
 const remoteHeavy: AppState = {
   ...base,
   timeEntries: Array.from({ length: 20 }, (_, i) => ({
@@ -63,7 +63,7 @@ const remoteHeavy: AppState = {
     date: '2026-08-01',
     minutes: 45,
   })),
-  companyFinance: ledger({
+  personalFinance: ledger({
     categories: [
       { id: 'bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
     ],
@@ -71,7 +71,7 @@ const remoteHeavy: AppState = {
 }
 const localWithMicrosoft: AppState = {
   ...base,
-  companyFinance: ledger({
+  personalFinance: ledger({
     categories: [
       { id: 'bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
       {
@@ -92,20 +92,20 @@ const afterPick = mergeSessionSafeState(
   pick.source === 'local' ? remoteHeavy : localWithMicrosoft,
 )
 assert(
-  afterPick.companyFinance.categories.some((c) => c.name === 'Microsoft emails'),
-  'prefer-either fold must keep company expense from the richer finance side',
+  afterPick.personalFinance.categories.some((c) => c.name === 'Microsoft emails'),
+  'prefer-either fold must keep personal expense from the richer finance side',
 )
 
 const afterHydrate = mergeSessionSafeState(remoteHeavy, localWithMicrosoft, {
   timerMode: 'prefer-other',
 })
 assert(
-  afterHydrate.companyFinance.categories.some((c) => c.name === 'Microsoft emails'),
-  'prefer-other must keep just-added company expense from memory',
+  afterHydrate.personalFinance.categories.some((c) => c.name === 'Microsoft emails'),
+  'prefer-other must keep just-added personal expense from memory',
 )
 assert(
-  afterHydrate.companyFinance.categories.find((c) => c.id === 'ms-email')?.amount === 72,
-  'company expense amount must survive hydrate fold',
+  afterHydrate.personalFinance.categories.find((c) => c.id === 'ms-email')?.amount === 72,
+  'personal expense amount must survive hydrate fold',
 )
 
 const foldedPersonal = mergeSessionSafeState(
