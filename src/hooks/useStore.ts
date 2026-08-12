@@ -6,11 +6,13 @@ import {
   isSupabaseConfigured,
 } from '../lib/supabase/browser'
 import {
+  absorbLegacyCompanyFinance,
   applyRevolutCredentialsToBrowser,
+  isRichFinanceLedger,
   isThinCloudPayload,
-  mergeFinanceLedgers,
   mergeRevolutCredentials,
   mergeSessionSafeState,
+  preferRicherFinanceLedger,
   preferRicherState,
   withLocalRevolutCredentials,
 } from '../lib/supabase/sync'
@@ -555,25 +557,10 @@ function migrateLedger(raw: Partial<FinanceLedger> | undefined, fallback: Financ
   }
 }
 
-/** True when the ledger has more than a bare empty Bills preset. */
-function isRichLedger(ledger: FinanceLedger): boolean {
-  const cats = ledger.categories || []
-  if ((ledger.wishlist?.length || 0) > 0) return true
-  if (cats.length === 0) return false
-  if (cats.length > 1) return true
-  const only = cats[0]
-  if (!only) return false
-  if (only.name.toLowerCase() !== 'bills') return true
-  if (only.amount > 0) return true
-  return cats.some((c) => c.parentId)
-}
-
-function preferRicherLedger(current: FinanceLedger, candidate: FinanceLedger): FinanceLedger {
-  return mergeFinanceLedgers(current, candidate)
-}
-
 function readFinanceBackup(): {
   personalFinance?: FinanceLedger
+  /** Legacy company ledger — still recovered after the company tab was removed. */
+  companyFinance?: FinanceLedger
   savedAt?: number
 } | null {
   try {
@@ -581,6 +568,7 @@ function readFinanceBackup(): {
     if (!raw) return null
     return JSON.parse(raw) as {
       personalFinance?: FinanceLedger
+      companyFinance?: FinanceLedger
       savedAt?: number
     }
   } catch {
@@ -589,12 +577,16 @@ function readFinanceBackup(): {
 }
 
 function writeFinanceBackup(personal: FinanceLedger) {
-  if (!isRichLedger(personal)) return
+  if (!isRichFinanceLedger(personal)) return
   try {
+    // Preserve any legacy companyFinance still sitting in the backup blob so a
+    // later recovery pass can still absorb it into personal.
+    const existing = readFinanceBackup()
     localStorage.setItem(
       FINANCE_BACKUP_KEY,
       JSON.stringify({
         personalFinance: personal,
+        ...(existing?.companyFinance ? { companyFinance: existing.companyFinance } : {}),
         savedAt: Date.now(),
       }),
     )
@@ -627,18 +619,31 @@ function migrateRevolutSync(
 function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?: boolean }): AppState {
   const seed = createSeedState()
   const today = todayDateKey()
+  const emptyCompanySeed = seed.personalFinance
 
   let personalFinance = migrateLedger(parsed.personalFinance, seed.personalFinance)
+  // Older saves kept a separate company ledger — fold it into personal before
+  // we drop the field, otherwise Set expenses shows Bills $0.
+  let legacyCompanyFinance = migrateLedger(
+    (parsed as { companyFinance?: Partial<FinanceLedger> }).companyFinance,
+    emptyCompanySeed,
+  )
 
   if (options?.recoverLocal) {
     try {
       const rawV1 = localStorage.getItem('batcave-deep-work-os-v1')
       const rawV2 = localStorage.getItem(STORAGE_KEY)
       if (rawV1 && rawV2) {
-        const older = JSON.parse(rawV1) as Partial<AppState>
-        personalFinance = preferRicherLedger(
+        const older = JSON.parse(rawV1) as Partial<AppState> & {
+          companyFinance?: Partial<FinanceLedger>
+        }
+        personalFinance = preferRicherFinanceLedger(
           personalFinance,
           migrateLedger(older.personalFinance, seed.personalFinance),
+        )
+        legacyCompanyFinance = preferRicherFinanceLedger(
+          legacyCompanyFinance,
+          migrateLedger(older.companyFinance, emptyCompanySeed),
         )
       }
     } catch {
@@ -646,15 +651,24 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     }
     const backup = readFinanceBackup()
     if (backup) {
-      personalFinance = preferRicherLedger(
+      personalFinance = preferRicherFinanceLedger(
         personalFinance,
         withBackupTimestamp(
           migrateLedger(backup.personalFinance, seed.personalFinance),
           backup.savedAt,
         ),
       )
+      legacyCompanyFinance = preferRicherFinanceLedger(
+        legacyCompanyFinance,
+        withBackupTimestamp(
+          migrateLedger(backup.companyFinance, emptyCompanySeed),
+          backup.savedAt,
+        ),
+      )
     }
   }
+
+  personalFinance = absorbLegacyCompanyFinance(personalFinance, legacyCompanyFinance)
 
   // Legacy company finances tab → personal (via normalizeActiveTab)
   const activeTab = normalizeActiveTab((parsed as { activeTab?: unknown }).activeTab)

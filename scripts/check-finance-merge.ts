@@ -3,8 +3,11 @@
  * Run: npx --yes tsx scripts/check-finance-merge.ts
  */
 import {
+  absorbLegacyCompanyFinance,
+  isRichFinanceLedger,
   mergeFinanceLedgers,
   mergeSessionSafeState,
+  preferRicherFinanceLedger,
   preferRicherState,
 } from '../src/lib/supabase/sync'
 import type { AppState, FinanceLedger } from '../src/types'
@@ -150,5 +153,72 @@ assert(
 
 // Empty seed ledger still builds.
 assert(emptyFinanceLedger('b').categories[0]?.name === 'Bills', 'empty ledger keeps Bills')
+
+const emptyNewer = ledger({
+  categories: [{ id: 'bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true }],
+  updatedAt: '2026-08-12T16:00:00.000Z',
+})
+assert(!isRichFinanceLedger(emptyNewer), 'bare Bills $0 is not rich')
+assert(
+  preferRicherFinanceLedger(emptyNewer, older).categories.some((c) => c.id === 'food'),
+  'preferRicherFinanceLedger must not let a newer empty seed wipe a rich backup',
+)
+
+const legacyCompany = ledger({
+  categories: [
+    { id: 'co-bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
+    {
+      id: 'yt',
+      name: 'YouTube',
+      frequency: 'monthly',
+      amount: 14,
+      parentId: 'co-bills',
+    },
+    {
+      id: 'ms-email',
+      name: 'Microsoft emails',
+      frequency: 'monthly',
+      amount: 72,
+    },
+  ],
+  updatedAt: '2026-08-10T09:00:00.000Z',
+})
+
+const absorbedFromEmpty = absorbLegacyCompanyFinance(emptyNewer, legacyCompany)
+assert(
+  absorbedFromEmpty.categories.some((c) => c.name === 'Microsoft emails'),
+  'empty personal must absorb legacy company expenses',
+)
+assert(
+  absorbedFromEmpty.categories.some((c) => c.name === 'YouTube'),
+  'company micro-expenses under Bills must come along',
+)
+assert(
+  Date.parse(absorbedFromEmpty.updatedAt || '') > Date.parse(legacyCompany.updatedAt || ''),
+  'absorbed company ledger must stamp a fresh updatedAt',
+)
+
+const personalWithFood = ledger({
+  categories: [
+    { id: 'p-bills', name: 'Bills', frequency: 'monthly', amount: 0, isPreset: true },
+    { id: 'food', name: 'Food & Drink', frequency: 'weekly', amount: 185 },
+  ],
+  updatedAt: '2026-08-11T08:00:00.000Z',
+})
+const unioned = absorbLegacyCompanyFinance(personalWithFood, legacyCompany)
+assert(
+  unioned.categories.some((c) => c.id === 'food'),
+  'union must keep personal Food & Drink',
+)
+assert(
+  unioned.categories.some((c) => c.name === 'Microsoft emails'),
+  'union must keep company top-level expenses',
+)
+const yt = unioned.categories.find((c) => c.name === 'YouTube')
+assert(yt?.parentId === 'p-bills', 'company Bills children must remap onto personal Bills')
+assert(
+  !unioned.categories.some((c) => c.id === 'co-bills'),
+  'duplicate company Bills preset must not remain after remap',
+)
 
 console.log('check-finance-merge: ok')

@@ -47,6 +47,22 @@ export function pickActiveTimer(
   return local ?? remote ?? null
 }
 
+/** True when the ledger has more than a bare empty Bills preset. */
+export function isRichFinanceLedger(ledger: FinanceLedger | undefined | null): boolean {
+  if (!ledger) return false
+  const cats = ledger.categories || []
+  if ((ledger.wishlist?.length || 0) > 0) return true
+  if ((ledger.allocations?.length || 0) > 0) return true
+  if ((ledger.spends?.length || 0) > 0) return true
+  if (cats.length === 0) return false
+  if (cats.length > 1) return true
+  const only = cats[0]
+  if (!only) return false
+  if (only.name.toLowerCase() !== 'bills') return true
+  if (only.amount > 0) return true
+  return cats.some((c) => c.parentId)
+}
+
 /**
  * Prefer the newer finance ledger when updatedAt exists; else the richer
  * structure. preferOtherOnTie keeps in-memory edits after hydrate/save.
@@ -67,6 +83,100 @@ export function mergeFinanceLedgers(
   if (baseScore > otherScore) return base
 
   return options?.preferOtherOnTie ? other : base
+}
+
+/**
+ * Local/backup recovery helper: never let an empty seed wipe a rich ledger,
+ * even when the empty side has a newer updatedAt (common after strip/reseed).
+ * When both are rich, fall through to updatedAt-aware merge.
+ */
+export function preferRicherFinanceLedger(
+  current: FinanceLedger,
+  candidate: FinanceLedger,
+): FinanceLedger {
+  const currentRich = isRichFinanceLedger(current)
+  const candidateRich = isRichFinanceLedger(candidate)
+  if (!currentRich && candidateRich) return candidate
+  if (currentRich && !candidateRich) return current
+  return mergeFinanceLedgers(current, candidate)
+}
+
+function isBillsPreset(cat: FinanceLedger['categories'][number]): boolean {
+  return Boolean(cat.isPreset && !cat.parentId && cat.name.toLowerCase() === 'bills')
+}
+
+/**
+ * Fold a legacy company finance ledger into personal after the company tab
+ * was removed. Unions categories / wishlist / cash rows so neither side is
+ * dropped when both have real data.
+ */
+export function absorbLegacyCompanyFinance(
+  personal: FinanceLedger,
+  company: FinanceLedger | undefined | null,
+): FinanceLedger {
+  if (!company || !isRichFinanceLedger(company)) return personal
+  const migratedAt = new Date().toISOString()
+  if (!isRichFinanceLedger(personal)) {
+    // Stamp now so a newer empty local seed cannot win the next hydrate fold.
+    return { ...company, updatedAt: migratedAt }
+  }
+
+  const personalBills = personal.categories.find(isBillsPreset)
+  const companyBills = company.categories.find(isBillsPreset)
+  const billsIdRemap =
+    personalBills && companyBills && personalBills.id !== companyBills.id
+      ? companyBills.id
+      : null
+
+  const byId = new Map(personal.categories.map((c) => [c.id, c]))
+  for (const cat of company.categories) {
+    if (billsIdRemap && cat.id === billsIdRemap) {
+      // Keep personal Bills preset; fold company Bills amount if personal is $0.
+      if (personalBills && personalBills.amount <= 0 && cat.amount > 0) {
+        byId.set(personalBills.id, { ...personalBills, amount: cat.amount })
+      }
+      continue
+    }
+    const remapped =
+      billsIdRemap && cat.parentId === billsIdRemap
+        ? { ...cat, parentId: personalBills!.id }
+        : cat
+    if (!byId.has(remapped.id)) {
+      byId.set(remapped.id, remapped)
+      continue
+    }
+    // Same id on both sides — keep the higher amount / non-empty name.
+    const existing = byId.get(remapped.id)!
+    byId.set(remapped.id, {
+      ...existing,
+      amount: Math.max(existing.amount || 0, remapped.amount || 0),
+      name: existing.name?.trim() ? existing.name : remapped.name,
+      frequency: existing.frequency || remapped.frequency,
+      parentId: existing.parentId ?? remapped.parentId,
+      isPreset: existing.isPreset || remapped.isPreset,
+    })
+  }
+
+  const allocById = new Map((personal.allocations || []).map((a) => [a.id, a]))
+  for (const a of company.allocations || []) {
+    if (a?.id && !allocById.has(a.id)) allocById.set(a.id, a)
+  }
+  const spendById = new Map((personal.spends || []).map((s) => [s.id, s]))
+  for (const s of company.spends || []) {
+    if (s?.id && !spendById.has(s.id)) spendById.set(s.id, s)
+  }
+  const wishById = new Map((personal.wishlist || []).map((w) => [w.id, w]))
+  for (const w of company.wishlist || []) {
+    if (w?.id && !wishById.has(w.id)) wishById.set(w.id, w)
+  }
+
+  return {
+    categories: Array.from(byId.values()),
+    allocations: Array.from(allocById.values()),
+    spends: Array.from(spendById.values()),
+    wishlist: Array.from(wishById.values()),
+    updatedAt: migratedAt,
+  }
 }
 
 /**
