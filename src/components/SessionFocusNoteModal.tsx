@@ -31,6 +31,7 @@ export function SessionFocusNoteModal({
   projectColor,
   initialNote = '',
   backlog = false,
+  liveTimerBlocksStart = false,
   onConfirm,
   onCancel,
 }: {
@@ -40,6 +41,8 @@ export function SessionFocusNoteModal({
   initialNote?: string
   /** When true, also ask how many minutes ago the session already started. */
   backlog?: boolean
+  /** When true, only “Log as done” is offered (a live timer already owns the clock). */
+  liveTimerBlocksStart?: boolean
   onConfirm: (result: SessionFocusConfirm) => void
   onCancel: () => void
 }) {
@@ -52,6 +55,7 @@ export function SessionFocusNoteModal({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const minutesRef = useRef<HTMLInputElement>(null)
   const targetRef = useRef<HTMLInputElement>(null)
+  const targetTouched = useRef(false)
 
   useEffect(() => {
     if (!open) return
@@ -59,6 +63,7 @@ export function SessionFocusNoteModal({
     setMinutesAgo('')
     setTargetMinutes('')
     setSessionDate(todayDateKey())
+    targetTouched.current = false
     // Focus the first empty required field
     requestAnimationFrame(() => {
       if (backlog) minutesRef.current?.focus()
@@ -79,6 +84,20 @@ export function SessionFocusNoteModal({
   const dateOk = !backlog || /^\d{4}-\d{2}-\d{2}$/.test(sessionDate)
   const ready = readyNote && minutesOk && targetOk && dateOk
   const remaining = Math.max(0, MIN_FOCUS_WORDS - words)
+  const onlyLogAsDone = backlog && liveTimerBlocksStart
+
+  const syncTargetFromMinutesWorked = (raw: string) => {
+    setMinutesAgo(raw)
+    if (targetTouched.current) return
+    const n = Number.parseInt(raw, 10)
+    if (!Number.isFinite(n) || n < 1) return
+    // Mirror minutes worked into target so Log as done isn’t stuck disabled.
+    const clamped = Math.min(
+      MAX_SESSION_TARGET_MINUTES,
+      Math.max(MIN_SESSION_TARGET_MINUTES, n),
+    )
+    setTargetMinutes(String(clamped))
+  }
 
   const submit = (logAsDone = false) => {
     const trimmed = note.trim().replace(/\s+/g, ' ')
@@ -90,7 +109,7 @@ export function SessionFocusNoteModal({
         focusNote: trimmed,
         targetMinutes: parsedTarget,
         startedMinutesAgo: parsedMinutes,
-        logAsDone: logAsDone || undefined,
+        logAsDone: onlyLogAsDone || logAsDone || undefined,
         sessionDate,
       })
     } else {
@@ -100,6 +119,7 @@ export function SessionFocusNoteModal({
     setMinutesAgo('')
     setTargetMinutes('')
     setSessionDate(todayDateKey())
+    targetTouched.current = false
   }
 
   return (
@@ -117,16 +137,18 @@ export function SessionFocusNoteModal({
           {backlog && (
             <button
               type="button"
-              className="btn-secondary"
+              className={onlyLogAsDone ? 'btn-primary' : 'btn-secondary'}
               disabled={!ready}
               onClick={() => submit(true)}
             >
               Log as done
             </button>
           )}
-          <button type="button" className="btn-primary" disabled={!ready} onClick={() => submit(false)}>
-            {backlog ? 'Start from then' : 'Start timer'}
-          </button>
+          {!onlyLogAsDone && (
+            <button type="button" className="btn-primary" disabled={!ready} onClick={() => submit(false)}>
+              {backlog ? 'Start from then' : 'Start timer'}
+            </button>
+          )}
         </>
       }
     >
@@ -135,9 +157,11 @@ export function SessionFocusNoteModal({
         {projectName}
       </p>
       <p className="session-focus-copy">
-        {backlog
-          ? 'Forgot to hit start or finish? Enter how long you worked, pick the day, lock Slight Edge Focus + target, then log it or resume the clock.'
-          : 'Lock these in before the clock starts. One edge to sharpen, and how long you plan to run.'}
+        {onlyLogAsDone
+          ? 'A live timer is already running. Log this past block without starting another clock.'
+          : backlog
+            ? 'Forgot to hit start or finish? Enter how long you worked, pick the day, lock Slight Edge Focus + target, then log it or resume the clock.'
+            : 'Lock these in before the clock starts. One edge to sharpen, and how long you plan to run.'}
       </p>
 
       {backlog && (
@@ -151,7 +175,7 @@ export function SessionFocusNoteModal({
             max={MAX_BACKLOG_MINUTES}
             step={1}
             value={minutesAgo}
-            onChange={(e) => setMinutesAgo(e.target.value)}
+            onChange={(e) => syncTargetFromMinutesWorked(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
@@ -162,8 +186,10 @@ export function SessionFocusNoteModal({
             aria-describedby="session-backlog-hint"
           />
           <span id="session-backlog-hint" className="session-focus-minutes-hint">
-            Log as done saves that block on the day you pick. Start from then opens a live timer
-            already counting (max {MAX_BACKLOG_MINUTES} min).
+            Log as done saves that block on the day you pick
+            {onlyLogAsDone
+              ? '.'
+              : `. Start from then opens a live timer already counting (max ${MAX_BACKLOG_MINUTES} min).`}
           </span>
         </label>
       )}
@@ -234,11 +260,14 @@ export function SessionFocusNoteModal({
           max={MAX_SESSION_TARGET_MINUTES}
           step={1}
           value={targetMinutes}
-          onChange={(e) => setTargetMinutes(e.target.value)}
+          onChange={(e) => {
+            targetTouched.current = true
+            setTargetMinutes(e.target.value)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
-              submit(false)
+              submit(onlyLogAsDone)
             }
           }}
           placeholder="e.g. 50"
@@ -250,7 +279,10 @@ export function SessionFocusNoteModal({
               key={preset}
               type="button"
               className={`session-focus-preset${parsedTarget === preset ? ' active' : ''}`}
-              onClick={() => setTargetMinutes(String(preset))}
+              onClick={() => {
+                targetTouched.current = true
+                setTargetMinutes(String(preset))
+              }}
             >
               {preset}m
             </button>
