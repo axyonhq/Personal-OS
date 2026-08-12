@@ -69,11 +69,16 @@ export function DeepWorkTimerHost({
   /** Deep work always prompts for Slight Edge Focus + target; other projects start with the note passed. */
   const requestStart = useCallback(
     (projectId: ProjectId, focusNote = '', minimized = false, backlog = false) => {
-      if (activeTimer?.projectId === projectId) {
+      // Live clock already on this project → just expand it (unless backlogging a past block).
+      if (activeTimer?.projectId === projectId && !backlog) {
         setTimerMinimized(false)
         return
       }
-      if (activeTimer) return
+      // A different live session blocks starting another clock — backlog log-as-done is still OK.
+      if (activeTimer && !backlog) {
+        setTimerMinimized(false)
+        return
+      }
 
       if (isDeepWorkId(projectId)) {
         setFocusPrompt({
@@ -85,6 +90,7 @@ export function DeepWorkTimerHost({
         return
       }
 
+      if (activeTimer) return
       beginTimer(projectId, focusNote.trim(), minimized)
     },
     [activeTimer, beginTimer],
@@ -170,62 +176,68 @@ export function DeepWorkTimerHost({
       <div className={`corner-dock${busy && timerMinimized ? ' beside-timer' : ''}`}>
         <div className="corner-dock-actions">
           <QuickAddTask store={store} />
-          {!busy && (
-            <div className={`deep-dock${dockOpen ? ' open' : ''}`}>
-              <button
-                type="button"
-                className="deep-dock-toggle"
-                aria-expanded={dockOpen}
-                onClick={() => {
-                  setDockOpen((v) => {
-                    if (v) setDockMode('start')
-                    return !v
-                  })
-                }}
-              >
-                <span className="deep-dock-pulse" aria-hidden />
-                Deep work
-              </button>
-              {dockOpen && (
-                <div className="deep-dock-panel" role="menu">
-                  <p className="deep-dock-hint">
-                    {dockMode === 'backlog'
-                      ? 'Pick project — then enter how long ago'
+          <div className={`deep-dock${dockOpen ? ' open' : ''}`}>
+            <button
+              type="button"
+              className="deep-dock-toggle"
+              aria-expanded={dockOpen}
+              onClick={() => {
+                setDockOpen((v) => {
+                  if (v) setDockMode('start')
+                  return !v
+                })
+              }}
+            >
+              <span className="deep-dock-pulse" aria-hidden />
+              Deep work
+            </button>
+            {dockOpen && (
+              <div className="deep-dock-panel" role="menu">
+                <p className="deep-dock-hint">
+                  {dockMode === 'backlog'
+                    ? busy
+                      ? 'Pick project — log a past block (live timer stays)'
+                      : 'Pick project — then enter how long you worked'
+                    : busy
+                      ? 'A session is live — expand the timer, or backlog a past block'
                       : 'Set focus + target, then start'}
-                  </p>
-                  {DEEP_WORK_IDS.map((id) => {
-                    const project = PROJECT_MAP[id]
-                    const logged = store.minutesFor(id, 'day', todayDateKey())
-                    const target = store.state.dailyDeepWorkSplit[id]
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="deep-dock-item"
-                        role="menuitem"
-                        style={{ ['--project-color' as string]: project.color }}
-                        onClick={() => startProject(id)}
-                      >
-                        <span className="deep-dock-name">{project.name}</span>
-                        <span className="deep-dock-meta">
-                          {formatMinutes(logged)} / {formatMinutes(target)}
-                        </span>
-                      </button>
-                    )
-                  })}
-                  <button
-                    type="button"
-                    className={`deep-dock-backlog${dockMode === 'backlog' ? ' active' : ''}`}
-                    onClick={() =>
-                      setDockMode((m) => (m === 'backlog' ? 'start' : 'backlog'))
-                    }
-                  >
-                    {dockMode === 'backlog' ? 'Cancel backlog' : 'Already going? Backlog…'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+                </p>
+                {DEEP_WORK_IDS.map((id) => {
+                  const project = PROJECT_MAP[id]
+                  const logged = store.minutesFor(id, 'day', todayDateKey())
+                  const target = store.state.dailyDeepWorkSplit[id]
+                  const liveHere = activeTimer?.projectId === id
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="deep-dock-item"
+                      role="menuitem"
+                      style={{ ['--project-color' as string]: project.color }}
+                      onClick={() => startProject(id)}
+                    >
+                      <span className="deep-dock-name">
+                        {project.name}
+                        {liveHere ? ' · live' : ''}
+                      </span>
+                      <span className="deep-dock-meta">
+                        {formatMinutes(logged)} / {formatMinutes(target)}
+                      </span>
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  className={`deep-dock-backlog${dockMode === 'backlog' ? ' active' : ''}`}
+                  onClick={() =>
+                    setDockMode((m) => (m === 'backlog' ? 'start' : 'backlog'))
+                  }
+                >
+                  {dockMode === 'backlog' ? 'Cancel backlog' : 'Already going? Backlog…'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -235,12 +247,15 @@ export function DeepWorkTimerHost({
         projectColor={focusProject?.color ?? '#888'}
         initialNote={focusPrompt?.seedNote ?? ''}
         backlog={focusPrompt?.backlog ?? false}
+        liveTimerBlocksStart={busy && !!focusPrompt?.backlog}
         onCancel={() => setFocusPrompt(null)}
         onConfirm={({ focusNote, targetMinutes, startedMinutesAgo, logAsDone, sessionDate }) => {
           if (!focusPrompt) return
           const { projectId, minimized } = focusPrompt
           setFocusPrompt(null)
-          if (logAsDone && startedMinutesAgo != null) {
+          // Prefer log-as-done when a live timer already owns the clock.
+          const mustLog = logAsDone || (!!store.state.activeTimer && startedMinutesAgo != null)
+          if (mustLog && startedMinutesAgo != null) {
             logCompletedSession(projectId, focusNote, startedMinutesAgo, {
               targetMinutes,
               date: sessionDate,

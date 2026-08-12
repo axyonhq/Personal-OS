@@ -29,6 +29,17 @@ export function TimerOverlay({
   if (!timer) return null
 
   const project = PROJECT_MAP[timer.projectId]
+  if (!project) {
+    // Corrupt / stale timer — clear it so Deep Work + backlog stay usable.
+    return (
+      <ModalPortal>
+        <button type="button" className="mini-timer" onClick={() => store.discardTimer()}>
+          <span className="digits">Bad timer · tap to clear</span>
+        </button>
+      </ModalPortal>
+    )
+  }
+
   const displayToday = store.projectMinutesToday[timer.projectId]
   const paused = store.isTimerPaused
   const hasPauses = timer.pauseCount > 0 || paused
