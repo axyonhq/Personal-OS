@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 
-/** Mentor runs on OpenAI (same OPENAI_API_KEY as Chief of Staff). */
+/** Mentor runs on OpenAI (`OPENAI_API_KEY`). */
 export const MENTOR_OPENAI_MODEL =
   process.env.MENTOR_OPENAI_MODEL?.trim() ||
   process.env.COS_OPENAI_MODEL?.trim() ||

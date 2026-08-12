@@ -161,8 +161,8 @@ export function EveningWindDown({
               <>
                 {step.id === 'finance' && (
                   <div className="wind-down-panel wind-down-finance">
-                    <RevolutSyncPanel store={store} realm="personal" embedded />
-                    <CashTrackerPanel store={store} realm="personal" mode="daily" embedded />
+                    <RevolutSyncPanel store={store} embedded />
+                    <CashTrackerPanel store={store} embedded />
                   </div>
                 )}
 
