@@ -1,6 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import type { Store } from '../../hooks/useStore'
-import type { FinanceRealm } from '../../types'
 import {
   allocatableBuckets,
   budgetForCategory,
@@ -11,19 +10,16 @@ import {
 import { formatLongDate, todayDateKey } from '../../utils/time'
 import { HudPanel } from '../HudPanel'
 
+const REALM = 'personal' as const
+
 export function CashTrackerPanel({
   store,
-  realm,
-  mode,
   embedded = false,
 }: {
   store: Store
-  realm: FinanceRealm
-  /** personal = daily budget tracker; company = simple spend log */
-  mode: 'daily' | 'simple'
   embedded?: boolean
 }) {
-  const ledger = store.financeFor(realm)
+  const ledger = store.financeFor(REALM)
   const date = todayDateKey()
   const buckets = allocatableBuckets(ledger)
 
@@ -46,17 +42,17 @@ export function CashTrackerPanel({
     e.preventDefault()
     const parsed = parseAmount(amount)
     if (parsed === null || parsed <= 0) return
-    if (mode === 'simple' || kind === 'unexpected') {
-      store.addSpend(realm, {
+    if (kind === 'unexpected') {
+      store.addSpend(REALM, {
         date,
         amount: parsed,
-        kind: mode === 'simple' ? 'unexpected' : 'unexpected',
-        label: mode === 'simple' ? label.trim() || note.trim() || 'Spend' : label,
+        kind: 'unexpected',
+        label,
         note: note || undefined,
       })
     } else {
       if (!effectiveCategoryId) return
-      store.addSpend(realm, {
+      store.addSpend(REALM, {
         date,
         amount: parsed,
         kind: 'category',
@@ -70,61 +66,54 @@ export function CashTrackerPanel({
   }
 
   const todaySpends = ledger.spends.filter((s) => s.date === date)
-  const recent = mode === 'simple' ? ledger.spends.slice(0, 12) : todaySpends
 
-  const budgetRows =
-    mode === 'daily'
-      ? buckets.map((b) => {
-          const parent = b.parentId ? catLookup.get(b.parentId) : null
-          const freq = parent?.frequency ?? b.frequency
-          const budget = budgetForCategory(ledger, b.id)
-          const spent = spentForCategory(ledger, b.id, date)
-          const remaining = Math.round((budget - spent) * 100) / 100
-          const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
-          const over = remaining < 0
-          return {
-            id: b.id,
-            label: parent ? `${parent.name} → ${b.name}` : b.name,
-            frequency: freq,
-            budget,
-            spent,
-            remaining,
-            pct,
-            over,
-          }
-        })
-      : []
+  const budgetRows = buckets.map((b) => {
+    const parent = b.parentId ? catLookup.get(b.parentId) : null
+    const freq = parent?.frequency ?? b.frequency
+    const budget = budgetForCategory(ledger, b.id)
+    const spent = spentForCategory(ledger, b.id, date)
+    const remaining = Math.round((budget - spent) * 100) / 100
+    const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
+    const over = remaining < 0
+    return {
+      id: b.id,
+      label: parent ? `${parent.name} → ${b.name}` : b.name,
+      frequency: freq,
+      budget,
+      spent,
+      remaining,
+      pct,
+      over,
+    }
+  })
 
   return (
-    <HudPanel label={mode === 'daily' ? 'DAILY CASH TRACKER' : 'CASH TRACKER'} embedded={embedded}>
+    <HudPanel label="DAILY CASH TRACKER" embedded={embedded}>
       <p className="finance-hint">
-        {mode === 'daily'
-          ? 'Log today’s outgoings against a set expense or as unexpected. Budget status follows each expense’s frequency.'
-          : 'Log cash spent. Keep it basic — amount, what it was for, done.'}
+        Log today’s outgoings against a set expense or as unexpected. Budget status follows each
+        expense’s frequency.
       </p>
 
       <form className="finance-tracker-form" onSubmit={submit}>
-        {mode === 'daily' && (
-          <div className="summary-toggle finance-kind-toggle" role="group" aria-label="Spend type">
-            <button
-              type="button"
-              className={kind === 'category' ? 'active' : ''}
-              onClick={() => setKind('category')}
-            >
-              Set expense
-            </button>
-            <button
-              type="button"
-              className={kind === 'unexpected' ? 'active' : ''}
-              onClick={() => setKind('unexpected')}
-            >
-              Unexpected
-            </button>
-          </div>
-        )}
+        <div className="summary-toggle finance-kind-toggle" role="group" aria-label="Spend type">
+          <button
+            type="button"
+            className={kind === 'category' ? 'active' : ''}
+            onClick={() => setKind('category')}
+          >
+            Set expense
+          </button>
+          <button
+            type="button"
+            className={kind === 'unexpected' ? 'active' : ''}
+            onClick={() => setKind('unexpected')}
+          >
+            Unexpected
+          </button>
+        </div>
 
         <div className="finance-form-grid">
-          {mode === 'daily' && kind === 'category' ? (
+          {kind === 'category' ? (
             <select
               value={effectiveCategoryId}
               onChange={(e) => setCategoryId(e.target.value)}
@@ -145,7 +134,7 @@ export function CashTrackerPanel({
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder={mode === 'simple' ? 'What was it for?' : 'Unexpected expense'}
+              placeholder="Unexpected expense"
               aria-label="Expense label"
             />
           )}
@@ -168,7 +157,7 @@ export function CashTrackerPanel({
         </div>
       </form>
 
-      {mode === 'daily' && budgetRows.length > 0 && (
+      {budgetRows.length > 0 && (
         <div className="finance-budget-board">
           <div className="panel-label">
             <span>BUDGET STATUS · {formatLongDate(date)}</span>
@@ -210,13 +199,13 @@ export function CashTrackerPanel({
 
       <div className="finance-history">
         <div className="panel-label">
-          <span>{mode === 'daily' ? 'TODAY’S SPENDS' : 'RECENT SPENDS'}</span>
+          <span>TODAY’S SPENDS</span>
         </div>
-        {recent.length === 0 ? (
+        {todaySpends.length === 0 ? (
           <p className="finance-empty">No spends logged yet.</p>
         ) : (
           <ul className="finance-list">
-            {recent.map((s) => {
+            {todaySpends.map((s) => {
               const cat = s.categoryId ? catLookup.get(s.categoryId) : null
               const parent = cat?.parentId ? catLookup.get(cat.parentId) : null
               const title =
@@ -229,17 +218,14 @@ export function CashTrackerPanel({
                 <li key={s.id} className="finance-expense-row">
                   <div className="finance-expense-main">
                     <span className="finance-expense-name">{title}</span>
-                    <span className="finance-expense-meta">
-                      {mode === 'simple' ? formatLongDate(s.date) : ''}
-                      {s.note ? `${mode === 'simple' ? ' · ' : ''}${s.note}` : ''}
-                    </span>
+                    <span className="finance-expense-meta">{s.note ?? ''}</span>
                   </div>
                   <span className="finance-expense-amount">{formatMoney(s.amount)}</span>
                   <button
                     type="button"
                     className="x-btn visible"
                     aria-label="Remove spend"
-                    onClick={() => store.removeSpend(realm, s.id)}
+                    onClick={() => store.removeSpend(REALM, s.id)}
                   >
                     ×
                   </button>

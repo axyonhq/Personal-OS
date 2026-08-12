@@ -1,7 +1,6 @@
 import type {
   ActiveTimer,
   AppState,
-  CompanyDocument,
   FinanceLedger,
   RevolutCredentials,
   TimeEntry,
@@ -49,45 +48,6 @@ export function pickActiveTimer(
 }
 
 /**
- * Union company docs by id. When both sides have the same id, keep the newer
- * updatedAt (and on a tie, the longer body) so cloud hydrate cannot roll back
- * a just-saved document to an older snapshot.
- */
-export function mergeCompanyDocuments(
-  a: CompanyDocument[] = [],
-  b: CompanyDocument[] = [],
-): CompanyDocument[] {
-  const map = new Map<string, CompanyDocument>()
-  for (const doc of a) {
-    if (doc?.id) map.set(doc.id, doc)
-  }
-  for (const doc of b) {
-    if (!doc?.id) continue
-    const prev = map.get(doc.id)
-    if (!prev) {
-      map.set(doc.id, doc)
-      continue
-    }
-    const prevAt = Date.parse(prev.updatedAt) || 0
-    const nextAt = Date.parse(doc.updatedAt) || 0
-    if (nextAt > prevAt) {
-      map.set(doc.id, doc)
-      continue
-    }
-    if (nextAt < prevAt) continue
-    // Tie on timestamp: prefer the richer body so a blank overwrite loses.
-    const prevLen = (prev.content?.length || 0) + (prev.title?.length || 0)
-    const nextLen = (doc.content?.length || 0) + (doc.title?.length || 0)
-    if (nextLen > prevLen) map.set(doc.id, doc)
-  }
-  return Array.from(map.values()).sort((x, y) => {
-    const xAt = Date.parse(x.updatedAt) || 0
-    const yAt = Date.parse(y.updatedAt) || 0
-    return yAt - xAt
-  })
-}
-
-/**
  * Prefer the newer finance ledger when updatedAt exists; else the richer
  * structure. preferOtherOnTie keeps in-memory edits after hydrate/save.
  */
@@ -111,13 +71,13 @@ export function mergeFinanceLedgers(
 
 /**
  * After preferRicherState picks a base snapshot, fold in sessions, live timers,
- * company documents, and finance ledgers from the other side so cloud hydrate
- * cannot erase in-progress work or roll amounts / new expenses back.
+ * and personal finance ledgers from the other side so cloud hydrate cannot erase
+ * in-progress work or roll amounts / new expenses back.
  *
  * timerMode:
  * - prefer-either: keep a timer if either side has one (default for local↔remote)
  * - prefer-other: other is authoritative (use after hydrate so discard/finish /
- *   just-added company expenses stick)
+ *   just-added expenses stick)
  */
 export function mergeSessionSafeState(
   base: AppState,
@@ -126,16 +86,11 @@ export function mergeSessionSafeState(
 ): AppState {
   const timerMode = options?.timerMode ?? 'prefer-either'
   // After hydrate/save, memory is the source of truth for finance — a richer
-  // remote snapshot must not delete a company expense you just added
-  // (e.g. "Microsoft emails").
+  // remote snapshot must not delete an expense you just added.
   const personalFinance =
     timerMode === 'prefer-other'
       ? other.personalFinance
       : mergeFinanceLedgers(base.personalFinance, other.personalFinance)
-  const companyFinance =
-    timerMode === 'prefer-other'
-      ? other.companyFinance
-      : mergeFinanceLedgers(base.companyFinance, other.companyFinance)
   return {
     ...base,
     timeEntries: mergeTimeEntries(base.timeEntries, other.timeEntries),
@@ -143,9 +98,7 @@ export function mergeSessionSafeState(
       timerMode === 'prefer-other'
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
-    companyDocuments: mergeCompanyDocuments(base.companyDocuments, other.companyDocuments),
     personalFinance,
-    companyFinance,
   }
 }
 
@@ -188,9 +141,7 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
   const tasks = state.tasks
     ? Object.values(state.tasks).reduce((n, list) => n + (list?.length || 0), 0)
     : 0
-  const revolutAccounts =
-    (state.revolutSync?.personalAccountIds?.length || 0) +
-    (state.revolutSync?.companyAccountIds?.length || 0)
+  const revolutAccounts = state.revolutSync?.personalAccountIds?.length || 0
   const credentials =
     (state.revolutCredentials?.appSecret ? 8 : 0) +
     (state.revolutCredentials?.refreshToken ? 12 : 0)
@@ -203,29 +154,13 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     (state.habits?.filter((h) => (h.streak || 0) > 0 || h.lastCompletedDate).length || 0) * 3 +
     Object.keys(state.dailyOneThing || {}).length * 2 +
     ledgerScore(state.personalFinance) +
-    ledgerScore(state.companyFinance) +
     revolutAccounts * 10 +
     (state.revolutSync?.personalQueue?.length || 0) +
-    (state.revolutSync?.companyQueue?.length || 0) +
     credentials +
     (state.weekIntention && state.weekIntention.length > 40 ? 2 : 0) +
-    (state.companyDocuments?.length || 0) * 5 +
-    // Content weight so two snapshots with the same doc count still prefer
-    // the one that actually holds the saved text (not an empty/older body).
-    (state.companyDocuments?.reduce((n, d) => n + Math.min(d.content?.length || 0, 4000), 0) ||
-      0) /
-      200 +
-    (state.companyIdeas?.length || 0) * 3 +
-    (state.companyLogins?.length || 0) * 4 +
-    (state.companyDecisions?.length || 0) * 4 +
-    (state.coldEmailDomains?.length || 0) * 4 +
-    (state.coldEmailDomains?.reduce((n, d) => n + (d.mailboxes?.length || 0), 0) || 0) * 2 +
     (state.mentor?.journalEntries?.length || 0) * 4 +
     (state.mentor?.messages?.length || 0) +
     (state.mentor?.latestInsight ? 6 : 0) +
-    (state.chiefOfStaff?.briefs?.length || 0) * 2 +
-    (state.chiefOfStaff?.messages?.length || 0) +
-    (state.chiefOfStaff?.latestInsight ? 6 : 0) +
     (state.timeEntries?.filter((e) => e.debrief).length || 0) * 3 +
     Object.keys(state.bodyLogs || {}).length * 2
   )

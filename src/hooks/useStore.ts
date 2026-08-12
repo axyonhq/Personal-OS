@@ -1,9 +1,5 @@
 import { useAuth, useSession } from '@clerk/nextjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  buildOutlookColdEmailDomains,
-  COLD_EMAIL_OUTLOOK_CATALOG_VERSION,
-} from '../data/coldEmailOutlookCatalog'
 import { createSeedState, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
@@ -24,13 +20,6 @@ import type {
   AppTab,
   CalendarBlock,
   CashAllocationLine,
-  CompanyDecision,
-  CompanyDecisionOption,
-  CompanyIdea,
-  CompanyLogin,
-  ColdEmailDomain,
-  ColdEmailMailbox,
-  ColdEmailProvider,
   DailyBodyLog,
   DailyDeepWorkSplit,
   DeepWorkId,
@@ -64,17 +53,11 @@ import type {
   VisionGoal,
   WeeklyGoal,
   WeeklyGoalsArchiveEntry,
-  ChiefOfStaffState,
-  CoSBrief,
-  CoSBriefSlot,
-  CoSInsight,
-  CoSMessage,
 } from '../types'
 import {
   DEEP_WORK_IDS,
   EMPTY_AUTOPILOT_COMPLETIONS,
   equalDeepWorkSplit,
-  emptyChiefOfStaffState,
   emptyMentorState,
   mentorChargeKey,
   normalizeActiveTab,
@@ -82,7 +65,6 @@ import {
   scaleDeepWorkSplit,
   SESSION_FEELINGS,
   SESSION_TAGS,
-  cosBriefKey,
 } from '../types'
 import { mergePersonalFoodAndDrink, migrateWishlist } from '../utils/finance'
 import {
@@ -356,113 +338,6 @@ function migrateMentorState(raw: unknown): MentorState {
   }
 }
 
-function migrateChiefOfStaffState(raw: unknown): ChiefOfStaffState {
-  const empty = emptyChiefOfStaffState()
-  if (!raw || typeof raw !== 'object') return empty
-  const c = raw as Partial<ChiefOfStaffState>
-
-  const messages: CoSMessage[] = Array.isArray(c.messages)
-    ? c.messages
-        .map((msg): CoSMessage | null => {
-          if (!msg || typeof msg !== 'object') return null
-          const role = msg.role
-          if (role !== 'user' && role !== 'cos' && role !== 'system') return null
-          if (typeof msg.text !== 'string' || !msg.text.trim()) return null
-          const next: CoSMessage = {
-            id: typeof msg.id === 'string' && msg.id ? msg.id : uid('cosmsg'),
-            role,
-            text: msg.text,
-            createdAt:
-              typeof msg.createdAt === 'string' ? msg.createdAt : new Date().toISOString(),
-          }
-          if (typeof msg.briefId === 'string') next.briefId = msg.briefId
-          return next
-        })
-        .filter((m): m is CoSMessage => m != null)
-        .slice(-120)
-    : empty.messages
-
-  const briefs: CoSBrief[] = Array.isArray(c.briefs)
-    ? c.briefs
-        .map((b): CoSBrief | null => {
-          if (!b || typeof b !== 'object') return null
-          if (typeof b.date !== 'string' || (b.slot !== 'morning' && b.slot !== 'night')) return null
-          if (typeof b.summary !== 'string' || !b.summary.trim()) return null
-          const next: CoSBrief = {
-            id: typeof b.id === 'string' && b.id ? b.id : uid('brief'),
-            date: b.date,
-            slot: b.slot,
-            summary: b.summary,
-            actionItems: Array.isArray(b.actionItems)
-              ? b.actionItems.filter((x): x is string => typeof x === 'string')
-              : [],
-            blindSpots: Array.isArray(b.blindSpots)
-              ? b.blindSpots.filter((x): x is string => typeof x === 'string')
-              : [],
-            unmadeDecisions: Array.isArray(b.unmadeDecisions)
-              ? b.unmadeDecisions.filter((x): x is string => typeof x === 'string')
-              : [],
-            createdAt:
-              typeof b.createdAt === 'string' ? b.createdAt : new Date().toISOString(),
-          }
-          if (typeof b.readAt === 'string') next.readAt = b.readAt
-          if (typeof b.slackSentAt === 'string') next.slackSentAt = b.slackSentAt
-          return next
-        })
-        .filter((b): b is CoSBrief => b != null)
-        .slice(0, 60)
-    : []
-
-  const migrateInsight = (rawInsight: unknown): CoSInsight | null => {
-    if (!rawInsight || typeof rawInsight !== 'object') return null
-    const i = rawInsight as Partial<CoSInsight>
-    if (typeof i.summary !== 'string' || !i.summary.trim()) return null
-    return {
-      id: typeof i.id === 'string' && i.id ? i.id : uid('cosscan'),
-      createdAt: typeof i.createdAt === 'string' ? i.createdAt : new Date().toISOString(),
-      summary: i.summary,
-      patterns: Array.isArray(i.patterns)
-        ? i.patterns.filter((x): x is string => typeof x === 'string')
-        : [],
-      blindSpots: Array.isArray(i.blindSpots)
-        ? i.blindSpots.filter((x): x is string => typeof x === 'string')
-        : [],
-      unmadeDecisions: Array.isArray(i.unmadeDecisions)
-        ? i.unmadeDecisions.filter((x): x is string => typeof x === 'string')
-        : [],
-      actionItems: Array.isArray(i.actionItems)
-        ? i.actionItems.filter((x): x is string => typeof x === 'string')
-        : [],
-    }
-  }
-
-  const latestInsight = migrateInsight(c.latestInsight)
-  const insightHistory = Array.isArray(c.insightHistory)
-    ? c.insightHistory.map(migrateInsight).filter((x): x is CoSInsight => x != null).slice(0, 20)
-    : []
-
-  const morningHour =
-    typeof c.morningHour === 'number' && c.morningHour >= 0 && c.morningHour <= 23
-      ? Math.round(c.morningHour)
-      : 7
-  const nightHour =
-    typeof c.nightHour === 'number' && c.nightHour >= 0 && c.nightHour <= 23
-      ? Math.round(c.nightHour)
-      : 22
-  // Migrate previous default (20) to the new 22:00 WITA night brief.
-  const resolvedNight = nightHour === 20 && c.nightHour === 20 ? 22 : nightHour
-
-  return {
-    messages: messages.length > 0 ? messages : empty.messages,
-    briefs,
-    latestInsight,
-    insightHistory,
-    morningHour,
-    nightHour: resolvedNight,
-    proactiveEnabled: c.proactiveEnabled !== false,
-  }
-}
-
 function migrateTimeEntries(raw: unknown, fallback: TimeEntry[]): TimeEntry[] {
   if (!Array.isArray(raw)) return fallback
   return raw.map(migrateTimeEntry).filter((e): e is TimeEntry => e != null)
@@ -697,7 +572,6 @@ function preferRicherLedger(current: FinanceLedger, candidate: FinanceLedger): F
 
 function readFinanceBackup(): {
   personalFinance?: FinanceLedger
-  companyFinance?: FinanceLedger
   savedAt?: number
 } | null {
   try {
@@ -705,7 +579,6 @@ function readFinanceBackup(): {
     if (!raw) return null
     return JSON.parse(raw) as {
       personalFinance?: FinanceLedger
-      companyFinance?: FinanceLedger
       savedAt?: number
     }
   } catch {
@@ -713,14 +586,13 @@ function readFinanceBackup(): {
   }
 }
 
-function writeFinanceBackup(personal: FinanceLedger, company: FinanceLedger) {
-  if (!isRichLedger(personal) && !isRichLedger(company)) return
+function writeFinanceBackup(personal: FinanceLedger) {
+  if (!isRichLedger(personal)) return
   try {
     localStorage.setItem(
       FINANCE_BACKUP_KEY,
       JSON.stringify({
         personalFinance: personal,
-        companyFinance: company,
         savedAt: Date.now(),
       }),
     )
@@ -744,174 +616,10 @@ function migrateRevolutSync(
   if (!raw || typeof raw !== 'object') return fallback
   return {
     personalAccountIds: Array.isArray(raw.personalAccountIds) ? raw.personalAccountIds : [],
-    companyAccountIds: Array.isArray(raw.companyAccountIds) ? raw.companyAccountIds : [],
     personalQueue: Array.isArray(raw.personalQueue) ? raw.personalQueue : [],
-    companyQueue: Array.isArray(raw.companyQueue) ? raw.companyQueue : [],
     // Drop legacy discard settlements — discarded txns should reappear on sync
     settledIds: [],
   }
-}
-
-function migrateCompanyDecisions(
-  raw: unknown,
-  fallback: CompanyDecision[],
-): CompanyDecision[] {
-  if (!Array.isArray(raw)) return fallback
-  return raw
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null
-      const d = item as Partial<CompanyDecision>
-      const title = typeof d.title === 'string' ? d.title.trim() : ''
-      if (!title) return null
-      const options: CompanyDecisionOption[] = Array.isArray(d.options)
-        ? d.options
-            .map((opt) => {
-              if (!opt || typeof opt !== 'object') return null
-              const text = typeof opt.text === 'string' ? opt.text.trim() : ''
-              if (!text) return null
-              return {
-                id: typeof opt.id === 'string' && opt.id ? opt.id : uid('dopt'),
-                text,
-              } satisfies CompanyDecisionOption
-            })
-            .filter((o): o is CompanyDecisionOption => o != null)
-        : []
-      const status: CompanyDecision['status'] = d.status === 'decided' ? 'decided' : 'open'
-      const chosenOptionId =
-        typeof d.chosenOptionId === 'string' && options.some((o) => o.id === d.chosenOptionId)
-          ? d.chosenOptionId
-          : null
-      return {
-        id: typeof d.id === 'string' && d.id ? d.id : uid('decision'),
-        title,
-        why: typeof d.why === 'string' ? d.why : '',
-        decideBy: typeof d.decideBy === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.decideBy)
-          ? d.decideBy
-          : todayDateKey(),
-        options,
-        status: status === 'decided' && !chosenOptionId ? 'open' : status,
-        chosenOptionId: status === 'decided' ? chosenOptionId : null,
-        createdAt: typeof d.createdAt === 'string' ? d.createdAt : new Date().toISOString(),
-        updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : new Date().toISOString(),
-      } satisfies CompanyDecision
-    })
-    .filter((d): d is CompanyDecision => d != null)
-}
-
-function normalizeDomainHost(raw: string): string {
-  let value = raw.trim().toLowerCase()
-  if (!value) return ''
-  value = value.replace(/^https?:\/\//i, '')
-  value = value.split('/')[0] ?? ''
-  value = value.split('?')[0] ?? ''
-  value = value.replace(/^www\./, '')
-  value = value.replace(/\.$/, '')
-  // Strip trailing path leftovers / ports for host:port
-  const host = value.split(':')[0] ?? ''
-  if (!host || !host.includes('.')) return ''
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host)) {
-    return ''
-  }
-  return host
-}
-
-function parseDomainList(raw: string): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const part of raw.split(/[\s,;]+/)) {
-    const host = normalizeDomainHost(part)
-    if (!host || seen.has(host)) continue
-    seen.add(host)
-    out.push(host)
-  }
-  return out
-}
-
-function normalizeMailboxLocalPart(raw: string): string {
-  let value = raw.trim().toLowerCase()
-  if (!value) return ''
-  // Accept nick@, nick@domain.com, or nick
-  if (value.includes('@')) {
-    value = value.split('@')[0] ?? ''
-  }
-  value = value.replace(/^\.+|\.+$/g, '')
-  if (!value) return ''
-  if (!/^[a-z0-9]([a-z0-9._+-]*[a-z0-9])?$/i.test(value) && !/^[a-z0-9]$/i.test(value)) {
-    return ''
-  }
-  return value
-}
-
-function parseMailboxList(raw: string): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const part of raw.split(/[\s,;]+/)) {
-    const local = normalizeMailboxLocalPart(part)
-    if (!local || seen.has(local)) continue
-    seen.add(local)
-    out.push(local)
-  }
-  return out
-}
-
-function migrateColdEmailDomains(
-  raw: unknown,
-  fallback: ColdEmailDomain[],
-): ColdEmailDomain[] {
-  if (!Array.isArray(raw)) return fallback
-  return raw
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null
-      const d = item as Partial<ColdEmailDomain>
-      const domain = normalizeDomainHost(typeof d.domain === 'string' ? d.domain : '')
-      if (!domain) return null
-      const provider: ColdEmailProvider =
-        d.provider === 'google' ? 'google' : 'microsoft'
-      const mailboxes: ColdEmailMailbox[] = Array.isArray(d.mailboxes)
-        ? d.mailboxes
-            .map((box) => {
-              if (!box || typeof box !== 'object') return null
-              const localPart = normalizeMailboxLocalPart(
-                typeof box.localPart === 'string' ? box.localPart : '',
-              )
-              if (!localPart) return null
-              return {
-                id: typeof box.id === 'string' && box.id ? box.id : uid('mbox'),
-                localPart,
-                password: typeof box.password === 'string' ? box.password : '',
-                createdAt:
-                  typeof box.createdAt === 'string'
-                    ? box.createdAt
-                    : new Date().toISOString(),
-              } satisfies ColdEmailMailbox
-            })
-            .filter((b): b is ColdEmailMailbox => b != null)
-        : []
-      // Dedupe local parts
-      const seen = new Set<string>()
-      const uniqueMailboxes = mailboxes.filter((b) => {
-        if (seen.has(b.localPart)) return false
-        seen.add(b.localPart)
-        return true
-      })
-      return {
-        id: typeof d.id === 'string' && d.id ? d.id : uid('cedom'),
-        domain,
-        provider,
-        mailboxes: uniqueMailboxes,
-        createdAt: typeof d.createdAt === 'string' ? d.createdAt : new Date().toISOString(),
-        updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : new Date().toISOString(),
-      } satisfies ColdEmailDomain
-    })
-    .filter((d): d is ColdEmailDomain => d != null)
-}
-
-function queueKey(realm: FinanceRealm): 'personalQueue' | 'companyQueue' {
-  return realm === 'personal' ? 'personalQueue' : 'companyQueue'
-}
-
-function accountIdsKey(realm: FinanceRealm): 'personalAccountIds' | 'companyAccountIds' {
-  return realm === 'personal' ? 'personalAccountIds' : 'companyAccountIds'
 }
 
 function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?: boolean }): AppState {
@@ -919,7 +627,6 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
   const today = todayDateKey()
 
   let personalFinance = migrateLedger(parsed.personalFinance, seed.personalFinance)
-  let companyFinance = migrateLedger(parsed.companyFinance, seed.companyFinance)
 
   if (options?.recoverLocal) {
     try {
@@ -930,10 +637,6 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
         personalFinance = preferRicherLedger(
           personalFinance,
           migrateLedger(older.personalFinance, seed.personalFinance),
-        )
-        companyFinance = preferRicherLedger(
-          companyFinance,
-          migrateLedger(older.companyFinance, seed.companyFinance),
         )
       }
     } catch {
@@ -948,34 +651,34 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           backup.savedAt,
         ),
       )
-      companyFinance = preferRicherLedger(
-        companyFinance,
-        withBackupTimestamp(
-          migrateLedger(backup.companyFinance, seed.companyFinance),
-          backup.savedAt,
-        ),
-      )
     }
   }
 
-  const priorColdEmailCatalogVersion =
-    typeof parsed.coldEmailCatalogVersion === 'number' ? parsed.coldEmailCatalogVersion : 0
-  const coldEmailCatalogNeedsReplace =
-    priorColdEmailCatalogVersion < COLD_EMAIL_OUTLOOK_CATALOG_VERSION
-  const coldEmailDomains = coldEmailCatalogNeedsReplace
-    ? buildOutlookColdEmailDomains()
-    : migrateColdEmailDomains(parsed.coldEmailDomains, seed.coldEmailDomains)
-  const coldEmailCatalogVersion = coldEmailCatalogNeedsReplace
-    ? COLD_EMAIL_OUTLOOK_CATALOG_VERSION
-    : priorColdEmailCatalogVersion
+  // Legacy company finances tab → personal (via normalizeActiveTab)
+  const activeTab = normalizeActiveTab((parsed as { activeTab?: unknown }).activeTab)
+
+  // Drop deleted company / CoS / cold-email fields from older saves
+  const parsedClean = { ...(parsed as Record<string, unknown>) }
+  for (const key of [
+    'companyFinance',
+    'companyDocuments',
+    'companyIdeas',
+    'companyLogins',
+    'companyDecisions',
+    'coldEmailDomains',
+    'coldEmailCatalogVersion',
+    'chiefOfStaff',
+  ] as const) {
+    delete parsedClean[key]
+  }
 
   return {
     ...seed,
-    ...parsed,
+    ...(parsedClean as Partial<AppState>),
     // Always open on Bali “today” so the day label matches WITA
     selectedDate: today,
     calendarMonth: todayMonthKey(),
-    activeTab: normalizeActiveTab(parsed.activeTab),
+    activeTab,
     tasks: migrateTasks((parsed.tasks as AppState['tasks']) || seed.tasks),
     dailyDeepWorkTargetMinutes:
       parsed.dailyDeepWorkTargetMinutes ?? seed.dailyDeepWorkTargetMinutes,
@@ -1010,7 +713,6 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     autopilotCompletions: migrateAutopilotCompletions(parsed.autopilotCompletions),
     habits: migrateHabits(parsed.habits ?? seed.habits, today),
     personalFinance: mergePersonalFoodAndDrink(personalFinance),
-    companyFinance,
     revolutSync: migrateRevolutSync(parsed.revolutSync, seed.revolutSync),
     revolutCredentials: parsed.revolutCredentials,
     visionGoals: Array.isArray(parsed.visionGoals)
@@ -1030,58 +732,9 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           })
           .filter((g): g is VisionGoal => g != null)
       : seed.visionGoals,
-    companyDocuments: Array.isArray(parsed.companyDocuments)
-      ? parsed.companyDocuments
-      : seed.companyDocuments,
-    companyIdeas: Array.isArray(parsed.companyIdeas)
-      ? parsed.companyIdeas.map((idea) => {
-          const raw = idea as CompanyIdea & { title?: string }
-          const text = typeof raw.text === 'string' ? raw.text : ''
-          const title =
-            typeof raw.title === 'string' && raw.title.trim()
-              ? raw.title.trim()
-              : text.split('\n')[0]?.slice(0, 80) || 'Untitled idea'
-          return {
-            id: raw.id,
-            title,
-            text,
-            createdAt: raw.createdAt,
-            updatedAt: raw.updatedAt,
-          }
-        })
-      : seed.companyIdeas,
-    companyLogins: Array.isArray(parsed.companyLogins)
-      ? parsed.companyLogins
-          .map((row) => {
-            const raw = row as Partial<CompanyLogin>
-            if (!raw || typeof raw.id !== 'string') return null
-            const url = typeof raw.url === 'string' ? raw.url.trim() : ''
-            const platform = typeof raw.platform === 'string' ? raw.platform.trim() : ''
-            const username = typeof raw.username === 'string' ? raw.username.trim() : ''
-            const password = typeof raw.password === 'string' ? raw.password : ''
-            if (!url && !platform && !username) return null
-            return {
-              id: raw.id,
-              platform,
-              url,
-              username,
-              password,
-              twoFactorEnabled: Boolean(raw.twoFactorEnabled),
-              createdAt:
-                typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
-              updatedAt:
-                typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
-            } satisfies CompanyLogin
-          })
-          .filter((row): row is CompanyLogin => row != null)
-      : seed.companyLogins,
-    companyDecisions: migrateCompanyDecisions(parsed.companyDecisions, seed.companyDecisions),
-    coldEmailDomains,
-    coldEmailCatalogVersion,
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
-    chiefOfStaff: migrateChiefOfStaffState(parsed.chiefOfStaff),
   }
 }
 
@@ -1095,10 +748,6 @@ function loadState(): AppState {
   } catch {
     return createSeedState()
   }
-}
-
-function ledgerKey(realm: FinanceRealm): 'personalFinance' | 'companyFinance' {
-  return realm === 'personal' ? 'personalFinance' : 'companyFinance'
 }
 
 export function useStore() {
@@ -1120,7 +769,7 @@ export function useStore() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    writeFinanceBackup(state.personalFinance, state.companyFinance)
+    writeFinanceBackup(state.personalFinance)
   }, [state])
 
   const upsertCloudState = useCallback(
@@ -1160,19 +809,14 @@ export function useStore() {
               const merged = mergeSessionSafeState(saved, latest, {
                 timerMode: 'prefer-other',
               })
-              const docsChanged =
-                JSON.stringify(merged.companyDocuments) !==
-                JSON.stringify(saved.companyDocuments)
               const sessionsChanged =
                 JSON.stringify(merged.timeEntries) !== JSON.stringify(saved.timeEntries) ||
                 JSON.stringify(merged.activeTimer) !== JSON.stringify(saved.activeTimer)
               const financeChanged =
                 JSON.stringify(merged.personalFinance) !==
-                  JSON.stringify(saved.personalFinance) ||
-                JSON.stringify(merged.companyFinance) !==
-                  JSON.stringify(saved.companyFinance)
+                JSON.stringify(saved.personalFinance)
 
-              if (docsChanged || sessionsChanged || financeChanged) {
+              if (sessionsChanged || financeChanged) {
                 cloudSaveQueue.current = merged
                 skipNextCloudSave.current = true
                 stateRef.current = merged
@@ -1265,13 +909,10 @@ export function useStore() {
         const afterUpsert = withLocalRevolutCredentials(stateRef.current)
         saved = mergeSessionSafeState(saved, afterUpsert, { timerMode: 'prefer-other' })
         const needsFollowUpSave =
-          JSON.stringify(saved.companyDocuments) !==
-            JSON.stringify(chosen.companyDocuments) ||
           JSON.stringify(saved.timeEntries) !== JSON.stringify(chosen.timeEntries) ||
           JSON.stringify(saved.activeTimer) !== JSON.stringify(chosen.activeTimer) ||
           JSON.stringify(saved.personalFinance) !==
-            JSON.stringify(chosen.personalFinance) ||
-          JSON.stringify(saved.companyFinance) !== JSON.stringify(chosen.companyFinance)
+            JSON.stringify(chosen.personalFinance)
 
         applyRevolutCredentialsToBrowser(saved.revolutCredentials)
         skipNextCloudSave.current = true
@@ -1365,13 +1006,12 @@ export function useStore() {
   }, [])
 
   const patchLedger = useCallback(
-    (realm: FinanceRealm, fn: (ledger: FinanceLedger) => FinanceLedger) => {
-      const key = ledgerKey(realm)
+    (_realm: FinanceRealm, fn: (ledger: FinanceLedger) => FinanceLedger) => {
       update((s) => {
-        const next = fn(s[key])
+        const next = fn(s.personalFinance)
         return {
           ...s,
-          [key]: {
+          personalFinance: {
             ...next,
             updatedAt: new Date().toISOString(),
           },
@@ -2234,204 +1874,6 @@ export function useStore() {
     [resolveMentorCharge],
   )
 
-  const appendCoSMessage = useCallback(
-    (
-      message: Omit<CoSMessage, 'id' | 'createdAt'> & {
-        id?: string
-        createdAt?: string
-      },
-    ) => {
-      update((s) => {
-        const next: CoSMessage = {
-          id: message.id || uid('cosmsg'),
-          role: message.role,
-          text: message.text,
-          createdAt: message.createdAt || new Date().toISOString(),
-          briefId: message.briefId,
-        }
-        return {
-          ...s,
-          chiefOfStaff: {
-            ...s.chiefOfStaff,
-            messages: [...(s.chiefOfStaff?.messages || []), next].slice(-120),
-          },
-        }
-      })
-    },
-    [update],
-  )
-
-  const saveCoSBrief = useCallback(
-    (
-      input: Omit<CoSBrief, 'id' | 'createdAt'> & {
-        id?: string
-        createdAt?: string
-        chatReply?: string
-      },
-    ) => {
-      const now = input.createdAt || new Date().toISOString()
-      const id = input.id || uid('brief')
-      const brief: CoSBrief = {
-        id,
-        date: input.date,
-        slot: input.slot,
-        summary: input.summary,
-        actionItems: input.actionItems || [],
-        blindSpots: input.blindSpots || [],
-        unmadeDecisions: input.unmadeDecisions || [],
-        createdAt: now,
-        readAt: input.readAt,
-      }
-      update((s) => {
-        const cos = s.chiefOfStaff || emptyChiefOfStaffState()
-        const withoutDup = (cos.briefs || []).filter(
-          (b) => cosBriefKey(b.date, b.slot) !== cosBriefKey(brief.date, brief.slot),
-        )
-        const chatText =
-          input.chatReply?.trim() ||
-          [
-            `${brief.slot === 'morning' ? 'Morning' : 'Night'} brief · ${brief.date}`,
-            brief.summary,
-            '',
-            'Actions:',
-            ...brief.actionItems.map((a, i) => `${i + 1}. ${a}`),
-          ].join('\n')
-        return {
-          ...s,
-          chiefOfStaff: {
-            ...cos,
-            briefs: [brief, ...withoutDup].slice(0, 60),
-            messages: [
-              ...(cos.messages || []),
-              {
-                id: uid('cosmsg'),
-                role: 'cos' as const,
-                text: chatText,
-                createdAt: now,
-                briefId: id,
-              },
-            ].slice(-120),
-          },
-        }
-      })
-      return brief
-    },
-    [update],
-  )
-
-  const markCoSBriefRead = useCallback(
-    (id: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        chiefOfStaff: {
-          ...s.chiefOfStaff,
-          briefs: (s.chiefOfStaff?.briefs || []).map((b) =>
-            b.id === id ? { ...b, readAt: b.readAt || now } : b,
-          ),
-        },
-      }))
-    },
-    [update],
-  )
-
-  const markCoSBriefSlackSent = useCallback(
-    (id: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        chiefOfStaff: {
-          ...s.chiefOfStaff,
-          briefs: (s.chiefOfStaff?.briefs || []).map((b) =>
-            b.id === id ? { ...b, slackSentAt: b.slackSentAt || now } : b,
-          ),
-        },
-      }))
-    },
-    [update],
-  )
-
-  const saveCoSInsight = useCallback(
-    (
-      insight: Omit<CoSInsight, 'id' | 'createdAt'> & {
-        id?: string
-        createdAt?: string
-        chatReply?: string
-      },
-    ) => {
-      const now = insight.createdAt || new Date().toISOString()
-      const next: CoSInsight = {
-        id: insight.id || uid('cosscan'),
-        createdAt: now,
-        summary: insight.summary,
-        patterns: insight.patterns || [],
-        blindSpots: insight.blindSpots || [],
-        unmadeDecisions: insight.unmadeDecisions || [],
-        actionItems: insight.actionItems || [],
-      }
-      update((s) => {
-        const cos = s.chiefOfStaff || emptyChiefOfStaffState()
-        return {
-          ...s,
-          chiefOfStaff: {
-            ...cos,
-            latestInsight: next,
-            insightHistory: [next, ...(cos.insightHistory || [])].slice(0, 20),
-            messages: insight.chatReply
-              ? [
-                  ...(cos.messages || []),
-                  {
-                    id: uid('cosmsg'),
-                    role: 'cos' as const,
-                    text: insight.chatReply,
-                    createdAt: now,
-                  },
-                ].slice(-120)
-              : cos.messages,
-          },
-        }
-      })
-      return next
-    },
-    [update],
-  )
-
-  const setCoSProactive = useCallback(
-    (enabled: boolean) => {
-      update((s) => ({
-        ...s,
-        chiefOfStaff: {
-          ...(s.chiefOfStaff || emptyChiefOfStaffState()),
-          proactiveEnabled: enabled,
-        },
-      }))
-    },
-    [update],
-  )
-
-  const setCoSBriefHours = useCallback(
-    (morningHour: number, nightHour: number) => {
-      update((s) => ({
-        ...s,
-        chiefOfStaff: {
-          ...(s.chiefOfStaff || emptyChiefOfStaffState()),
-          morningHour: Math.max(0, Math.min(23, Math.round(morningHour))),
-          nightHour: Math.max(0, Math.min(23, Math.round(nightHour))),
-        },
-      }))
-    },
-    [update],
-  )
-
-  const hasCoSBrief = useCallback(
-    (date: string, slot: CoSBriefSlot) => {
-      return (state.chiefOfStaff?.briefs || []).some(
-        (b) => cosBriefKey(b.date, b.slot) === cosBriefKey(date, slot),
-      )
-    },
-    [state.chiefOfStaff?.briefs],
-  )
-
   const discardTimer = useCallback(() => {
     update({ activeTimer: null })
   }, [update])
@@ -2694,13 +2136,12 @@ export function useStore() {
   )
 
   const setRevolutAccountIds = useCallback(
-    (realm: FinanceRealm, accountIds: string[]) => {
-      const key = accountIdsKey(realm)
+    (_realm: FinanceRealm, accountIds: string[]) => {
       update((s) => ({
         ...s,
         revolutSync: {
           ...s.revolutSync,
-          [key]: [...new Set(accountIds)],
+          personalAccountIds: [...new Set(accountIds)],
         },
       }))
     },
@@ -2708,18 +2149,14 @@ export function useStore() {
   )
 
   const mergeRevolutReviewItems = useCallback(
-    (realm: FinanceRealm, items: RevolutReviewItem[]) => {
-      const qKey = queueKey(realm)
+    (_realm: FinanceRealm, items: RevolutReviewItem[]) => {
       update((s) => {
         // Only skip txns already logged as spends — discarded ones come back on re-sync
         const logged = new Set<string>()
         for (const spend of s.personalFinance.spends) {
           if (spend.revolutId) logged.add(spend.revolutId)
         }
-        for (const spend of s.companyFinance.spends) {
-          if (spend.revolutId) logged.add(spend.revolutId)
-        }
-        const existing = new Map(s.revolutSync[qKey].map((item) => [item.id, item]))
+        const existing = new Map(s.revolutSync.personalQueue.map((item) => [item.id, item]))
         for (const item of items) {
           if (logged.has(item.id)) continue
           existing.set(item.id, item)
@@ -2729,7 +2166,7 @@ export function useStore() {
           revolutSync: {
             ...s.revolutSync,
             settledIds: [],
-            [qKey]: [...existing.values()].sort((a, b) =>
+            personalQueue: [...existing.values()].sort((a, b) =>
               b.createdAt.localeCompare(a.createdAt),
             ),
           },
@@ -2740,14 +2177,13 @@ export function useStore() {
   )
 
   const discardRevolutReviewItem = useCallback(
-    (realm: FinanceRealm, id: string) => {
-      const qKey = queueKey(realm)
+    (_realm: FinanceRealm, id: string) => {
       update((s) => ({
         ...s,
         revolutSync: {
           ...s.revolutSync,
           // Remove from queue only — do not permanently settle (re-sync can show again)
-          [qKey]: s.revolutSync[qKey].filter((item) => item.id !== id),
+          personalQueue: s.revolutSync.personalQueue.filter((item) => item.id !== id),
         },
       }))
     },
@@ -2756,7 +2192,7 @@ export function useStore() {
 
   const categorizeRevolutReviewItem = useCallback(
     (
-      realm: FinanceRealm,
+      _realm: FinanceRealm,
       id: string,
       input: {
         kind: SpendEntry['kind']
@@ -2767,11 +2203,8 @@ export function useStore() {
       if (input.kind === 'category' && !input.categoryId) return
       if (input.kind === 'unexpected' && !input.label?.trim()) return
 
-      const qKey = queueKey(realm)
-      const ledger = ledgerKey(realm)
-
       update((s) => {
-        const item = s.revolutSync[qKey].find((row) => row.id === id)
+        const item = s.revolutSync.personalQueue.find((row) => row.id === id)
         if (!item || item.direction !== 'out' || item.amount <= 0) return s
 
         const entry: SpendEntry = {
@@ -2787,13 +2220,13 @@ export function useStore() {
 
         return {
           ...s,
-          [ledger]: {
-            ...s[ledger],
-            spends: [entry, ...s[ledger].spends],
+          personalFinance: {
+            ...s.personalFinance,
+            spends: [entry, ...s.personalFinance.spends],
           },
           revolutSync: {
             ...s.revolutSync,
-            [qKey]: s.revolutSync[qKey].filter((row) => row.id !== id),
+            personalQueue: s.revolutSync.personalQueue.filter((row) => row.id !== id),
           },
         }
       })
@@ -2807,78 +2240,16 @@ export function useStore() {
       const next = {
         ...seed,
         personalFinance: s.personalFinance,
-        companyFinance: s.companyFinance,
         revolutSync: s.revolutSync,
-        companyDocuments: s.companyDocuments,
-        companyIdeas: s.companyIdeas,
-        companyLogins: s.companyLogins,
-        companyDecisions: s.companyDecisions,
-        coldEmailDomains: s.coldEmailDomains,
-        coldEmailCatalogVersion: s.coldEmailCatalogVersion,
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
-        chiefOfStaff: s.chiefOfStaff,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      writeFinanceBackup(next.personalFinance, next.companyFinance)
+      writeFinanceBackup(next.personalFinance)
       return next
     })
   }, [])
-
-  const addCompanyDocument = useCallback(
-    (input: { title: string; content?: string; sourceName?: string }) => {
-      const now = new Date().toISOString()
-      const title = input.title.trim() || 'Untitled'
-      const id = uid('doc')
-      update((s) => ({
-        ...s,
-        companyDocuments: [
-          {
-            id,
-            title,
-            content: input.content ?? '',
-            sourceName: input.sourceName,
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...s.companyDocuments,
-        ],
-      }))
-      return id
-    },
-    [update],
-  )
-
-  const updateCompanyDocument = useCallback(
-    (id: string, patch: Partial<{ title: string; content: string }>) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDocuments: s.companyDocuments.map((d) =>
-          d.id === id
-            ? {
-                ...d,
-                title: patch.title !== undefined ? patch.title.trim() || d.title : d.title,
-                content: patch.content !== undefined ? patch.content : d.content,
-                updatedAt: now,
-              }
-            : d,
-        ),
-      }))
-    },
-    [update],
-  )
-
-  const removeCompanyDocument = useCallback(
-    (id: string) => {
-      update((s) => ({
-        ...s,
-        companyDocuments: s.companyDocuments.filter((d) => d.id !== id),
-      }))
-    },
-    [update],
-  )
 
   const addVisionGoal = useCallback(
     (input: { title: string; body: string }) => {
@@ -2925,465 +2296,6 @@ export function useStore() {
       update((s) => ({
         ...s,
         visionGoals: (s.visionGoals ?? []).filter((goal) => goal.id !== id),
-      }))
-    },
-    [update],
-  )
-
-  const addCompanyIdea = useCallback(
-    (input: { title: string; text: string }) => {
-      const title = input.title.trim()
-      const text = input.text.trim()
-      if (!title && !text) return
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyIdeas: [
-          {
-            id: uid('idea'),
-            title: title || 'Untitled idea',
-            text,
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...s.companyIdeas,
-        ],
-      }))
-    },
-    [update],
-  )
-
-  const updateCompanyIdea = useCallback(
-    (id: string, patch: Partial<{ title: string; text: string }>) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyIdeas: s.companyIdeas.map((idea) => {
-          if (idea.id !== id) return idea
-          const title =
-            patch.title !== undefined ? patch.title.trim() || idea.title : idea.title
-          const text = patch.text !== undefined ? patch.text : idea.text
-          return { ...idea, title, text, updatedAt: now }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeCompanyIdea = useCallback(
-    (id: string) => {
-      update((s) => ({
-        ...s,
-        companyIdeas: s.companyIdeas.filter((idea) => idea.id !== id),
-      }))
-    },
-    [update],
-  )
-
-  const addCompanyLogin = useCallback(
-    (input: {
-      platform: string
-      url: string
-      username: string
-      password: string
-      twoFactorEnabled: boolean
-    }) => {
-      const platform = input.platform.trim()
-      const url = input.url.trim()
-      const username = input.username.trim()
-      const password = input.password
-      if (!platform && !url && !username) return
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyLogins: [
-          {
-            id: uid('login'),
-            platform,
-            url,
-            username,
-            password,
-            twoFactorEnabled: Boolean(input.twoFactorEnabled),
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...(s.companyLogins ?? []),
-        ],
-      }))
-    },
-    [update],
-  )
-
-  const updateCompanyLogin = useCallback(
-    (
-      id: string,
-      patch: Partial<{
-        platform: string
-        url: string
-        username: string
-        password: string
-        twoFactorEnabled: boolean
-      }>,
-    ) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyLogins: (s.companyLogins ?? []).map((login) => {
-          if (login.id !== id) return login
-          return {
-            ...login,
-            platform:
-              patch.platform !== undefined ? patch.platform.trim() : login.platform,
-            url: patch.url !== undefined ? patch.url.trim() : login.url,
-            username:
-              patch.username !== undefined ? patch.username.trim() : login.username,
-            password: patch.password !== undefined ? patch.password : login.password,
-            twoFactorEnabled:
-              patch.twoFactorEnabled !== undefined
-                ? Boolean(patch.twoFactorEnabled)
-                : login.twoFactorEnabled,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeCompanyLogin = useCallback(
-    (id: string) => {
-      update((s) => ({
-        ...s,
-        companyLogins: (s.companyLogins ?? []).filter((login) => login.id !== id),
-      }))
-    },
-    [update],
-  )
-
-  const addColdEmailDomains = useCallback(
-    (raw: string, provider: ColdEmailProvider = 'microsoft') => {
-      const hosts = parseDomainList(raw)
-      if (hosts.length === 0) return
-      const now = new Date().toISOString()
-      update((s) => {
-        const existing = new Set(
-          (s.coldEmailDomains ?? []).map((d) => d.domain.toLowerCase()),
-        )
-        const additions: ColdEmailDomain[] = []
-        for (const host of hosts) {
-          if (existing.has(host)) continue
-          existing.add(host)
-          additions.push({
-            id: uid('cedom'),
-            domain: host,
-            provider,
-            mailboxes: [],
-            createdAt: now,
-            updatedAt: now,
-          })
-        }
-        if (additions.length === 0) return s
-        return {
-          ...s,
-          coldEmailDomains: [...additions, ...(s.coldEmailDomains ?? [])],
-        }
-      })
-    },
-    [update],
-  )
-
-  const updateColdEmailDomain = useCallback(
-    (id: string, patch: Partial<{ provider: ColdEmailProvider; domain: string }>) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
-          if (row.id !== id) return row
-          const nextDomain =
-            patch.domain !== undefined
-              ? normalizeDomainHost(patch.domain) || row.domain
-              : row.domain
-          const nextProvider: ColdEmailProvider =
-            patch.provider === 'google' || patch.provider === 'microsoft'
-              ? patch.provider
-              : row.provider
-          return {
-            ...row,
-            domain: nextDomain,
-            provider: nextProvider,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeColdEmailDomain = useCallback(
-    (id: string) => {
-      update((s) => ({
-        ...s,
-        coldEmailDomains: (s.coldEmailDomains ?? []).filter((row) => row.id !== id),
-      }))
-    },
-    [update],
-  )
-
-  const addColdEmailMailboxes = useCallback(
-    (domainId: string, raw: string) => {
-      const locals = parseMailboxList(raw)
-      if (locals.length === 0) return
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
-          if (row.id !== domainId) return row
-          const existing = new Set(row.mailboxes.map((m) => m.localPart))
-          const additions: ColdEmailMailbox[] = []
-          for (const localPart of locals) {
-            if (existing.has(localPart)) continue
-            existing.add(localPart)
-            additions.push({
-              id: uid('mbox'),
-              localPart,
-              password: '',
-              createdAt: now,
-            })
-          }
-          if (additions.length === 0) return row
-          return {
-            ...row,
-            mailboxes: [...row.mailboxes, ...additions],
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const updateColdEmailMailbox = useCallback(
-    (
-      domainId: string,
-      mailboxId: string,
-      patch: Partial<{ localPart: string; password: string }>,
-    ) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
-          if (row.id !== domainId) return row
-          return {
-            ...row,
-            mailboxes: row.mailboxes.map((box) => {
-              if (box.id !== mailboxId) return box
-              const nextLocal =
-                patch.localPart !== undefined
-                  ? normalizeMailboxLocalPart(patch.localPart) || box.localPart
-                  : box.localPart
-              return {
-                ...box,
-                localPart: nextLocal,
-                password: patch.password !== undefined ? patch.password : box.password,
-              }
-            }),
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeColdEmailMailbox = useCallback(
-    (domainId: string, mailboxId: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        coldEmailDomains: (s.coldEmailDomains ?? []).map((row) => {
-          if (row.id !== domainId) return row
-          return {
-            ...row,
-            mailboxes: row.mailboxes.filter((m) => m.id !== mailboxId),
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const addCompanyDecision = useCallback(
-    (input: { title: string; why?: string; decideBy: string; options?: string[] }) => {
-      const title = input.title.trim()
-      if (!title) return
-      const now = new Date().toISOString()
-      const decideBy =
-        typeof input.decideBy === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.decideBy)
-          ? input.decideBy
-          : todayDateKey()
-      const options: CompanyDecisionOption[] = (input.options ?? [])
-        .map((text) => text.trim())
-        .filter(Boolean)
-        .map((text) => ({ id: uid('dopt'), text }))
-      update((s) => ({
-        ...s,
-        companyDecisions: [
-          {
-            id: uid('decision'),
-            title,
-            why: (input.why ?? '').trim(),
-            decideBy,
-            options,
-            status: 'open',
-            chosenOptionId: null,
-            createdAt: now,
-            updatedAt: now,
-          },
-          ...(s.companyDecisions ?? []),
-        ],
-      }))
-    },
-    [update],
-  )
-
-  const updateCompanyDecision = useCallback(
-    (
-      id: string,
-      patch: Partial<{
-        title: string
-        why: string
-        decideBy: string
-        status: CompanyDecision['status']
-        chosenOptionId: string | null
-      }>,
-    ) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).map((decision) => {
-          if (decision.id !== id) return decision
-          const title =
-            patch.title !== undefined ? patch.title.trim() || decision.title : decision.title
-          const why = patch.why !== undefined ? patch.why : decision.why
-          const decideBy =
-            patch.decideBy !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(patch.decideBy)
-              ? patch.decideBy
-              : decision.decideBy
-          let status = patch.status !== undefined ? patch.status : decision.status
-          let chosenOptionId =
-            patch.chosenOptionId !== undefined ? patch.chosenOptionId : decision.chosenOptionId
-          if (status === 'decided') {
-            const valid =
-              chosenOptionId && decision.options.some((o) => o.id === chosenOptionId)
-            if (!valid) {
-              status = 'open'
-              chosenOptionId = null
-            }
-          } else {
-            chosenOptionId = null
-          }
-          return {
-            ...decision,
-            title,
-            why,
-            decideBy,
-            status,
-            chosenOptionId,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const addCompanyDecisionOption = useCallback(
-    (decisionId: string, text: string) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).map((decision) => {
-          if (decision.id !== decisionId) return decision
-          return {
-            ...decision,
-            options: [...decision.options, { id: uid('dopt'), text: trimmed }],
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeCompanyDecisionOption = useCallback(
-    (decisionId: string, optionId: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).map((decision) => {
-          if (decision.id !== decisionId) return decision
-          const options = decision.options.filter((o) => o.id !== optionId)
-          const chosenLost = decision.chosenOptionId === optionId
-          return {
-            ...decision,
-            options,
-            chosenOptionId: chosenLost ? null : decision.chosenOptionId,
-            status: chosenLost ? 'open' : decision.status,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const decideCompanyDecision = useCallback(
-    (decisionId: string, optionId: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).map((decision) => {
-          if (decision.id !== decisionId) return decision
-          if (!decision.options.some((o) => o.id === optionId)) return decision
-          return {
-            ...decision,
-            status: 'decided',
-            chosenOptionId: optionId,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const reopenCompanyDecision = useCallback(
-    (decisionId: string) => {
-      const now = new Date().toISOString()
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).map((decision) => {
-          if (decision.id !== decisionId) return decision
-          return {
-            ...decision,
-            status: 'open',
-            chosenOptionId: null,
-            updatedAt: now,
-          }
-        }),
-      }))
-    },
-    [update],
-  )
-
-  const removeCompanyDecision = useCallback(
-    (id: string) => {
-      update((s) => ({
-        ...s,
-        companyDecisions: (s.companyDecisions ?? []).filter((d) => d.id !== id),
       }))
     },
     [update],
@@ -3537,8 +2449,8 @@ export function useStore() {
   const weekEnd = addDays(weekStart, 6)
 
   const financeFor = useCallback(
-    (realm: FinanceRealm) => state[ledgerKey(realm)],
-    [state],
+    (_realm: FinanceRealm) => state.personalFinance,
+    [state.personalFinance],
   )
 
   return {
@@ -3612,14 +2524,6 @@ export function useStore() {
     markPrescriptionInstalled,
     resolveMentorCharge,
     actionMentorCharge,
-    appendCoSMessage,
-    saveCoSBrief,
-    markCoSBriefRead,
-    markCoSBriefSlackSent,
-    saveCoSInsight,
-    setCoSProactive,
-    setCoSBriefHours,
-    hasCoSBrief,
     addCalendarBlock,
     updateCalendarBlock,
     removeCalendarBlock,
@@ -3639,31 +2543,9 @@ export function useStore() {
     discardRevolutReviewItem,
     categorizeRevolutReviewItem,
     financeFor,
-    addCompanyDocument,
-    updateCompanyDocument,
-    removeCompanyDocument,
     addVisionGoal,
     updateVisionGoal,
     removeVisionGoal,
-    addCompanyIdea,
-    updateCompanyIdea,
-    removeCompanyIdea,
-    addCompanyLogin,
-    updateCompanyLogin,
-    removeCompanyLogin,
-    addColdEmailDomains,
-    updateColdEmailDomain,
-    removeColdEmailDomain,
-    addColdEmailMailboxes,
-    updateColdEmailMailbox,
-    removeColdEmailMailbox,
-    addCompanyDecision,
-    updateCompanyDecision,
-    addCompanyDecisionOption,
-    removeCompanyDecisionOption,
-    decideCompanyDecision,
-    reopenCompanyDecision,
-    removeCompanyDecision,
     minutesFor,
     resetToSeed,
     parseDateKey,

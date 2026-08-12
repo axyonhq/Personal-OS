@@ -252,80 +252,6 @@ export function mentorChargeKey(kind: MentorChargeKind, text: string): string {
   return `${kind}:${text.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 140)}`
 }
 
-/** Chief of Staff chat roles */
-export type CoSChatRole = 'user' | 'cos' | 'system'
-
-export interface CoSMessage {
-  id: string
-  role: CoSChatRole
-  text: string
-  createdAt: string
-  /** Optional link to a proactive brief */
-  briefId?: string
-}
-
-export type CoSBriefSlot = 'morning' | 'night'
-
-export interface CoSBrief {
-  id: string
-  /** Calendar day in APP_TIMEZONE */
-  date: string
-  slot: CoSBriefSlot
-  summary: string
-  actionItems: string[]
-  blindSpots: string[]
-  unmadeDecisions: string[]
-  createdAt: string
-  readAt?: string
-  /** When this brief was posted to Slack */
-  slackSentAt?: string
-}
-
-export interface CoSInsight {
-  id: string
-  createdAt: string
-  summary: string
-  patterns: string[]
-  blindSpots: string[]
-  unmadeDecisions: string[]
-  actionItems: string[]
-}
-
-export interface ChiefOfStaffState {
-  messages: CoSMessage[]
-  briefs: CoSBrief[]
-  latestInsight: CoSInsight | null
-  insightHistory: CoSInsight[]
-  /** Local hour (0-23) in APP_TIMEZONE when morning brief may fire */
-  morningHour: number
-  /** Local hour (0-23) in APP_TIMEZONE when night brief may fire */
-  nightHour: number
-  proactiveEnabled: boolean
-}
-
-export function emptyChiefOfStaffState(): ChiefOfStaffState {
-  return {
-    messages: [
-      {
-        id: 'cos-welcome',
-        role: 'system',
-        text: 'Chief of Staff online. I scan the whole platform — company and personal — for blind spots, stuck decisions, and the one move that matters. Ask me anything. I also brief you every morning and every night.',
-        createdAt: new Date(0).toISOString(),
-      },
-    ],
-    briefs: [],
-    latestInsight: null,
-    insightHistory: [],
-    morningHour: 7,
-    nightHour: 22,
-    proactiveEnabled: true,
-  }
-}
-
-export function cosBriefKey(date: string, slot: CoSBriefSlot): string {
-  return `${date}:${slot}`
-}
-
 /** Recurrence rule for a calendar block. */
 export interface BlockRepeat {
   /** Days of week the block repeats on: 0 = Sunday … 6 = Saturday. Daily = all 7. */
@@ -418,7 +344,6 @@ export type AppTab =
   | 'calendar'
   | 'tasks'
   | 'personalFinances'
-  | 'companyFinances'
   | 'autopilot'
   | 'mentor'
   | 'vision'
@@ -428,7 +353,6 @@ const APP_TABS: readonly AppTab[] = [
   'calendar',
   'tasks',
   'personalFinances',
-  'companyFinances',
   'autopilot',
   'mentor',
   'vision',
@@ -466,60 +390,18 @@ export const EMPTY_AUTOPILOT_COMPLETIONS: AutopilotCompletions = {
 /** Map persisted / legacy tab ids onto current AppTab values. */
 export function normalizeActiveTab(tab: unknown): AppTab {
   if (tab === 'deepWork') return 'calendar'
+  if (tab === 'companyFinances') return 'personalFinances'
   if (typeof tab === 'string' && (APP_TABS as readonly string[]).includes(tab)) {
     return tab as AppTab
   }
   return 'dashboard'
 }
 
-/** Post-login layer: hub gate, personal OS, or company AXYON */
-export type AppLayer = 'gate' | 'personal' | 'business'
-
-/** Tabs inside the AXYON (company) layer */
-export type BusinessTab =
-  | 'commandDeck'
-  | 'todos'
-  | 'finance'
-  | 'documents'
-  | 'ideas'
-  | 'logins'
-  | 'decisions'
-  | 'metaAds'
-  | 'coldEmail'
-  | 'agents'
-
-export type EisenhowerQuadrant = 'do' | 'schedule' | 'delegate' | 'eliminate'
-/** @deprecated use EisenhowerQuadrant — kept as alias during migration */
-export type CompanyTaskPriority = EisenhowerQuadrant
-export type CompanyTaskStatus = 'not_started' | 'in_progress' | 'done'
-/** How much focus energy a company task needs */
-export type CompanyTaskEnergy = 'max' | 'medium' | 'little'
-
-export interface CompanyTask {
-  id: string
-  userId: string
-  title: string
-  priority: EisenhowerQuadrant
-  status: CompanyTaskStatus
-  notes: string
-  parentId: string | null
-  /** Manual list order among root tasks (lower = higher) */
-  sortOrder: number
-  /** When true, the task row is blurred so the title cannot be read */
-  hidden: boolean
-  /** YYYY-MM-DD due date; null means no deadline set */
-  deadline: string | null
-  /** Focus energy this task needs; null means unset */
-  energyRequired: CompanyTaskEnergy | null
-  /** How many hours you think this task will take; null means unset */
-  estimateHours: number | null
-  createdAt: string
-  updatedAt: string
-  /** Task IDs that must be done before this one can proceed */
-  blockedByIds: string[]
-}
-
-export type FinanceRealm = 'personal' | 'company'
+/**
+ * Finance realm string for store methods.
+ * Personal OS only — kept so call sites / useStore stay compatible during migration.
+ */
+export type FinanceRealm = 'personal'
 
 export type ExpenseFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
@@ -608,10 +490,7 @@ export interface RevolutReviewItem {
 export interface RevolutSyncState {
   /** Revolut account IDs synced into Personal Finances */
   personalAccountIds: string[]
-  /** Revolut account IDs synced into Company Finances */
-  companyAccountIds: string[]
   personalQueue: RevolutReviewItem[]
-  companyQueue: RevolutReviewItem[]
   /**
    * Legacy field. Discarded txns are no longer stored here — only logged spends
    * (via SpendEntry.revolutId) are skipped on re-sync. Kept empty for older clients.
@@ -664,113 +543,13 @@ export interface AppState {
   /** Autopilot ritual completion locks (date / week keys) */
   autopilotCompletions: AutopilotCompletions
   personalFinance: FinanceLedger
-  companyFinance: FinanceLedger
   revolutSync: RevolutSyncState
   /** Optional — synced to Supabase so Revolut works across browsers for this user */
   revolutCredentials?: RevolutCredentials
   /** Long-term inspiring goals */
   visionGoals: VisionGoal[]
-  /** AXYON documents (offer docs, briefs, etc.) */
-  companyDocuments: CompanyDocument[]
-  /** AXYON idea dump */
-  companyIdeas: CompanyIdea[]
-  /** AXYON platform logins / credentials vault */
-  companyLogins: CompanyLogin[]
-  /** AXYON Decision Gate — open loops & pending choices */
-  companyDecisions: CompanyDecision[]
-  /** AXYON Cold Email — sending domains + mailboxes */
-  coldEmailDomains: ColdEmailDomain[]
-  /**
-   * Catalog wipe version for cold email domains.
-   * Bump COLD_EMAIL_OUTLOOK_CATALOG_VERSION to force a one-time replace.
-   */
-  coldEmailCatalogVersion?: number
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
-  /** AXYON Chief of Staff — platform-wide briefs + chat */
-  chiefOfStaff: ChiefOfStaffState
-}
-
-export interface CompanyDocument {
-  id: string
-  title: string
-  /** Rich text body (HTML). Legacy plain/markdown is converted on load. */
-  content: string
-  /** Optional original filename when uploaded */
-  sourceName?: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface CompanyIdea {
-  id: string
-  title: string
-  text: string
-  createdAt: string
-  updatedAt: string
-}
-
-/** Saved login for a company platform / tool */
-export interface CompanyLogin {
-  id: string
-  /** Optional label (e.g. Stripe). Falls back to URL host when empty. */
-  platform: string
-  /** Clickable link to the platform */
-  url: string
-  /** Username or email */
-  username: string
-  password: string
-  /** Whether 2FA is enabled on this account */
-  twoFactorEnabled: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-export interface CompanyDecisionOption {
-  id: string
-  text: string
-}
-
-export type CompanyDecisionStatus = 'open' | 'decided'
-
-/** A pending or resolved choice in the AXYON Decision Gate */
-export interface CompanyDecision {
-  id: string
-  /** The decision / question */
-  title: string
-  /** Why this decision matters */
-  why: string
-  /** YYYY-MM-DD deadline to decide by */
-  decideBy: string
-  options: CompanyDecisionOption[]
-  status: CompanyDecisionStatus
-  chosenOptionId: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-/** Mailbox provider for a cold-email sending domain */
-export type ColdEmailProvider = 'microsoft' | 'google'
-
-/** Local-part mailbox under a cold-email domain (e.g. nick → nick@domain.com) */
-export interface ColdEmailMailbox {
-  id: string
-  /** Local part only — no @domain (e.g. "nick", "team") */
-  localPart: string
-  /** Login password for this mailbox */
-  password: string
-  createdAt: string
-}
-
-/** Sending domain + provider + linked mailboxes */
-export interface ColdEmailDomain {
-  id: string
-  /** Hostname only (e.g. axyonhq.com) */
-  domain: string
-  provider: ColdEmailProvider
-  mailboxes: ColdEmailMailbox[]
-  createdAt: string
-  updatedAt: string
 }
 
 export type SummaryMode = AppState['summaryMode']

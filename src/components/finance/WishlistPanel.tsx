@@ -1,19 +1,18 @@
 import { useState, type FormEvent } from 'react'
 import type { Store } from '../../hooks/useStore'
-import type { FinanceRealm } from '../../types'
 import { formatMoney, parseAmount } from '../../utils/finance'
 import { HudPanel } from '../HudPanel'
 
+const REALM = 'personal' as const
+
 export function WishlistPanel({
   store,
-  realm,
   embedded = false,
 }: {
   store: Store
-  realm: FinanceRealm
   embedded?: boolean
 }) {
-  const ledger = store.financeFor(realm)
+  const ledger = store.financeFor(REALM)
   const wishlist = ledger.wishlist ?? []
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
@@ -22,7 +21,7 @@ export function WishlistPanel({
     e.preventDefault()
     const parsed = parseAmount(amount)
     if (!name.trim() || parsed === null) return
-    store.addWishlistItem(realm, { name, amount: parsed })
+    store.addWishlistItem(REALM, { name, amount: parsed })
     setName('')
     setAmount('')
   }
@@ -71,7 +70,7 @@ export function WishlistPanel({
                     type="button"
                     className="x-btn visible"
                     aria-label={`Remove ${item.name}`}
-                    onClick={() => store.removeWishlistItem(realm, item.id)}
+                    onClick={() => store.removeWishlistItem(REALM, item.id)}
                   >
                     ×
                   </button>

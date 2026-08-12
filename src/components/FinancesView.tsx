@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import type { Store } from '../hooks/useStore'
-import type { FinanceRealm } from '../types'
 import { formatMoney, totalAllocated, totalMonthlyExpenses, totalSpent } from '../utils/finance'
 import { CashAllocationPanel } from './finance/CashAllocationPanel'
 import { CashTrackerPanel } from './finance/CashTrackerPanel'
-import { CompanyRevolutBuckets } from './finance/CompanyRevolutBuckets'
 import { RevolutSyncPanel } from './finance/RevolutSyncPanel'
 import { SetExpensesPanel } from './finance/SetExpensesPanel'
 import { WishlistPanel } from './finance/WishlistPanel'
@@ -12,32 +10,17 @@ import { Modal } from './ui/Modal'
 
 type FinanceModal = 'allocate' | 'expenses' | 'spend' | 'revolut' | 'wishlist' | null
 
-export function FinancesView({
-  store,
-  realm,
-}: {
-  store: Store
-  realm: FinanceRealm
-}) {
-  const ledger = store.financeFor(realm)
+export function FinancesView({ store }: { store: Store }) {
+  const ledger = store.financeFor('personal')
   const monthly = totalMonthlyExpenses(ledger)
   const allocated = totalAllocated(ledger)
   const spent = totalSpent(ledger)
-  const [balanceTick, setBalanceTick] = useState(0)
   const [modal, setModal] = useState<FinanceModal>(null)
 
-  const spendMode = realm === 'personal' ? 'daily' : 'simple'
-  const pendingReview =
-    realm === 'personal'
-      ? store.state.revolutSync.personalQueue.length
-      : store.state.revolutSync.companyQueue.length
+  const pendingReview = store.state.revolutSync.personalQueue.length
 
   return (
     <div className="layout-stack finance-view finance-view-clean">
-      {realm === 'company' && (
-        <CompanyRevolutBuckets store={store} refreshTick={balanceTick} />
-      )}
-
       <div className="finance-overview">
         <div className="finance-stat">
           <span className="finance-stat-label">Monthly set expenses</span>
@@ -72,21 +55,17 @@ export function FinancesView({
           <button type="button" className="action-tile" onClick={() => setModal('spend')}>
             <span className="action-tile-kicker">Outflow</span>
             <span className="action-tile-name">Log spend</span>
+            <span className="action-tile-desc">Daily cash tracker</span>
+          </button>
+          <button type="button" className="action-tile" onClick={() => setModal('wishlist')}>
+            <span className="action-tile-kicker">Want</span>
+            <span className="action-tile-name">Wishlist</span>
             <span className="action-tile-desc">
-              {realm === 'personal' ? 'Daily cash tracker' : 'Record company spend'}
+              {(ledger.wishlist?.length ?? 0) > 0
+                ? `${ledger.wishlist.length} item${ledger.wishlist.length === 1 ? '' : 's'} parked`
+                : 'Item + rough price before you buy'}
             </span>
           </button>
-          {realm === 'personal' && (
-            <button type="button" className="action-tile" onClick={() => setModal('wishlist')}>
-              <span className="action-tile-kicker">Want</span>
-              <span className="action-tile-name">Wishlist</span>
-              <span className="action-tile-desc">
-                {(ledger.wishlist?.length ?? 0) > 0
-                  ? `${ledger.wishlist.length} item${ledger.wishlist.length === 1 ? '' : 's'} parked`
-                  : 'Item + rough price before you buy'}
-              </span>
-            </button>
-          )}
           <button type="button" className="action-tile accent" onClick={() => setModal('revolut')}>
             <span className="action-tile-kicker">Bank</span>
             <span className="action-tile-name">Sync Revolut</span>
@@ -105,7 +84,7 @@ export function FinancesView({
         title="Allocate cash"
         size="lg"
       >
-        <CashAllocationPanel store={store} realm={realm} embedded />
+        <CashAllocationPanel store={store} embedded />
       </Modal>
 
       <Modal
@@ -114,11 +93,11 @@ export function FinancesView({
         title="Set expenses"
         size="lg"
       >
-        <SetExpensesPanel store={store} realm={realm} embedded />
+        <SetExpensesPanel store={store} embedded />
       </Modal>
 
       <Modal open={modal === 'spend'} onClose={() => setModal(null)} title="Log spend" size="lg">
-        <CashTrackerPanel store={store} realm={realm} mode={spendMode} embedded />
+        <CashTrackerPanel store={store} embedded />
       </Modal>
 
       <Modal
@@ -127,7 +106,7 @@ export function FinancesView({
         title="Spendings wishlist"
         size="md"
       >
-        <WishlistPanel store={store} realm={realm} embedded />
+        <WishlistPanel store={store} embedded />
       </Modal>
 
       <Modal
@@ -136,12 +115,7 @@ export function FinancesView({
         title="Sync Revolut"
         size="xl"
       >
-        <RevolutSyncPanel
-          store={store}
-          realm={realm}
-          embedded
-          onSynced={() => setBalanceTick((t) => t + 1)}
-        />
+        <RevolutSyncPanel store={store} embedded />
       </Modal>
     </div>
   )

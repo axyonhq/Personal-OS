@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import type { Store } from '../../hooks/useStore'
-import type { CashAllocationLine, FinanceRealm } from '../../types'
+import type { CashAllocationLine } from '../../types'
 import {
   allocatableBuckets,
   formatMoney,
@@ -8,6 +8,8 @@ import {
 } from '../../utils/finance'
 import { formatLongDate, todayDateKey } from '../../utils/time'
 import { HudPanel } from '../HudPanel'
+
+const REALM = 'personal' as const
 
 type DraftLine = {
   key: string
@@ -29,14 +31,12 @@ function emptyLine(buckets: ReturnType<typeof allocatableBuckets>): DraftLine {
 
 export function CashAllocationPanel({
   store,
-  realm,
   embedded = false,
 }: {
   store: Store
-  realm: FinanceRealm
   embedded?: boolean
 }) {
-  const ledger = store.financeFor(realm)
+  const ledger = store.financeFor(REALM)
   const buckets = allocatableBuckets(ledger)
   const catName = useMemo(() => {
     const map = new Map(ledger.categories.map((c) => [c.id, c.name]))
@@ -73,7 +73,7 @@ export function CashAllocationPanel({
       }
     }
     if (built.length === 0) return
-    store.addCashAllocation(realm, {
+    store.addCashAllocation(REALM, {
       date: todayDateKey(),
       totalAmount: parsedTotal,
       note,
@@ -107,7 +107,7 @@ export function CashAllocationPanel({
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Paycheck, client payment…"
+              placeholder="Paycheck, transfer…"
             />
           </label>
         </div>
@@ -222,7 +222,7 @@ export function CashAllocationPanel({
                     type="button"
                     className="x-btn visible"
                     aria-label="Remove allocation"
-                    onClick={() => store.removeCashAllocation(realm, a.id)}
+                    onClick={() => store.removeCashAllocation(REALM, a.id)}
                   >
                     ×
                   </button>
