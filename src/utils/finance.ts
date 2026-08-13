@@ -163,6 +163,138 @@ export function totalSpent(ledger: FinanceLedger): number {
   return ledger.spends.reduce((sum, s) => sum + s.amount, 0)
 }
 
+export function spentOnDate(ledger: FinanceLedger, date: string): number {
+  return ledger.spends.reduce((sum, s) => (s.date === date ? sum + s.amount : sum), 0)
+}
+
+export function toDailyAmount(amount: number, frequency: ExpenseFrequency): number {
+  return toMonthlyAmount(amount, frequency) / 30
+}
+
+export function toWeeklyAmount(amount: number, frequency: ExpenseFrequency): number {
+  return toMonthlyAmount(amount, frequency) * (12 / 52)
+}
+
+export function spentForCategoryInFrequency(
+  ledger: FinanceLedger,
+  categoryId: string,
+  frequency: ExpenseFrequency,
+  date: string,
+): number {
+  const children = childCategories(ledger, categoryId)
+  const ids =
+    children.length > 0
+      ? new Set([categoryId, ...children.map((c) => c.id)])
+      : new Set([categoryId])
+  return spendsInPeriod(ledger.spends, frequency, date).reduce((sum, s) => {
+    if (s.kind === 'category' && s.categoryId && ids.has(s.categoryId)) return sum + s.amount
+    return sum
+  }, 0)
+}
+
+export function unexpectedSpentInFrequency(
+  ledger: FinanceLedger,
+  frequency: ExpenseFrequency,
+  date: string,
+): number {
+  return spendsInPeriod(ledger.spends, frequency, date).reduce((sum, s) => {
+    if (s.kind === 'unexpected') return sum + s.amount
+    return sum
+  }, 0)
+}
+
+/** Days elapsed in the current period (1-based), plus period length. */
+export function periodProgress(
+  frequency: ExpenseFrequency,
+  date: string,
+): { elapsed: number; total: number } {
+  const { dates } = periodDatesFor(frequency, date)
+  const idx = dates.indexOf(date)
+  return { elapsed: Math.max(1, idx + 1), total: Math.max(1, dates.length) }
+}
+
+export function roundMoney(amount: number): number {
+  return Math.round(amount * 100) / 100
+}
+
+export type CategoryBudgetRow = {
+  id: string
+  name: string
+  frequency: ExpenseFrequency
+  budget: number
+  spent: number
+  remaining: number
+  pct: number
+  over: boolean
+  dailyBudget: number
+  dailySpent: number
+  weeklyBudget: number
+  weeklySpent: number
+  monthlyBudget: number
+  monthlySpent: number
+  paceExpected: number
+  ahead: number
+  children: Array<{
+    id: string
+    name: string
+    budget: number
+    spent: number
+    remaining: number
+    pct: number
+    over: boolean
+  }>
+}
+
+export function categoryBudgetRows(ledger: FinanceLedger, date: string): CategoryBudgetRow[] {
+  return topLevelCategories(ledger).map((cat) => {
+    const budget = budgetForCategory(ledger, cat.id)
+    const spent = spentForCategory(ledger, cat.id, date)
+    const remaining = roundMoney(budget - spent)
+    const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : spent > 0 ? 100 : 0
+    const over = remaining < 0
+    const { elapsed, total } = periodProgress(cat.frequency, date)
+    const paceExpected = roundMoney(budget * (elapsed / total))
+    const kids = childCategories(ledger, cat.id)
+    return {
+      id: cat.id,
+      name: cat.name,
+      frequency: cat.frequency,
+      budget,
+      spent,
+      remaining,
+      pct,
+      over,
+      dailyBudget: roundMoney(toDailyAmount(budget, cat.frequency)),
+      dailySpent: roundMoney(spentForCategoryInFrequency(ledger, cat.id, 'daily', date)),
+      weeklyBudget: roundMoney(toWeeklyAmount(budget, cat.frequency)),
+      weeklySpent: roundMoney(spentForCategoryInFrequency(ledger, cat.id, 'weekly', date)),
+      monthlyBudget: roundMoney(toMonthlyAmount(budget, cat.frequency)),
+      monthlySpent: roundMoney(spentForCategoryInFrequency(ledger, cat.id, 'monthly', date)),
+      paceExpected,
+      ahead: roundMoney(paceExpected - spent),
+      children: kids.map((kid) => {
+        const kidBudget = budgetForCategory(ledger, kid.id)
+        const kidSpent = spentForCategory(ledger, kid.id, date)
+        const kidRemaining = roundMoney(kidBudget - kidSpent)
+        return {
+          id: kid.id,
+          name: kid.name,
+          budget: kidBudget,
+          spent: kidSpent,
+          remaining: kidRemaining,
+          pct:
+            kidBudget > 0
+              ? Math.min(100, Math.round((kidSpent / kidBudget) * 100))
+              : kidSpent > 0
+                ? 100
+                : 0,
+          over: kidRemaining < 0,
+        }
+      }),
+    }
+  })
+}
+
 export function emptyFinanceLedger(billsId: string): FinanceLedger {
   return {
     categories: [

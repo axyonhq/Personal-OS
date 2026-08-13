@@ -485,6 +485,8 @@ export interface RevolutReviewItem {
   description: string
   reference?: string
   cardLastFour?: string
+  /** True when money only moved between own Revolut accounts */
+  internal?: boolean
 }
 
 export interface RevolutSyncState {
@@ -492,8 +494,8 @@ export interface RevolutSyncState {
   personalAccountIds: string[]
   personalQueue: RevolutReviewItem[]
   /**
-   * Legacy field. Discarded txns are no longer stored here — only logged spends
-   * (via SpendEntry.revolutId) are skipped on re-sync. Kept empty for older clients.
+   * Transaction / leg ids that should never reappear in a review queue.
+   * Includes discarded rows and logged spends (belt-and-suspenders with SpendEntry.revolutId).
    */
   settledIds: string[]
 }

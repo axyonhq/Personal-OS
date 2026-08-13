@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { Store } from '../hooks/useStore'
-import { formatMoney, totalAllocated, totalMonthlyExpenses, totalSpent } from '../utils/finance'
 import { CashAllocationPanel } from './finance/CashAllocationPanel'
 import { CashTrackerPanel } from './finance/CashTrackerPanel'
+import { PersonalFinanceDashboard } from './finance/PersonalFinanceDashboard'
 import { RevolutSyncPanel } from './finance/RevolutSyncPanel'
 import { SetExpensesPanel } from './finance/SetExpensesPanel'
 import { WishlistPanel } from './finance/WishlistPanel'
@@ -11,72 +11,49 @@ import { Modal } from './ui/Modal'
 type FinanceModal = 'allocate' | 'expenses' | 'spend' | 'revolut' | 'wishlist' | null
 
 export function FinancesView({ store }: { store: Store }) {
-  const ledger = store.financeFor('personal')
-  const monthly = totalMonthlyExpenses(ledger)
-  const allocated = totalAllocated(ledger)
-  const spent = totalSpent(ledger)
   const [modal, setModal] = useState<FinanceModal>(null)
-
   const pendingReview = store.state.revolutSync.personalQueue.length
 
   return (
-    <div className="layout-stack finance-view finance-view-clean">
-      <div className="finance-overview">
-        <div className="finance-stat">
-          <span className="finance-stat-label">Monthly set expenses</span>
-          <strong className="finance-stat-value">{formatMoney(monthly)}</strong>
+    <div className="layout-stack finance-view finance-command">
+      <header className="finance-command-head">
+        <div>
+          <p className="finance-command-kicker">Personal money</p>
+          <h1 className="finance-command-title">Command board</h1>
+          <p className="finance-command-copy">
+            Live spend vs budget. Buttons stay. The board is the point.
+          </p>
         </div>
-        <div className="finance-stat">
-          <span className="finance-stat-label">Cash allocated</span>
-          <strong className="finance-stat-value">{formatMoney(allocated)}</strong>
+        <div className="finance-dock">
+          <button type="button" className="finance-dock-btn" onClick={() => setModal('allocate')}>
+            <span className="finance-dock-kicker">Cash in</span>
+            <span className="finance-dock-name">Allocate cash</span>
+          </button>
+          <button type="button" className="finance-dock-btn" onClick={() => setModal('expenses')}>
+            <span className="finance-dock-kicker">Fixed</span>
+            <span className="finance-dock-name">Set expenses</span>
+          </button>
+          <button type="button" className="finance-dock-btn" onClick={() => setModal('spend')}>
+            <span className="finance-dock-kicker">Outflow</span>
+            <span className="finance-dock-name">Log spend</span>
+          </button>
+          <button type="button" className="finance-dock-btn" onClick={() => setModal('wishlist')}>
+            <span className="finance-dock-kicker">Want</span>
+            <span className="finance-dock-name">Wishlist</span>
+          </button>
+          <button
+            type="button"
+            className="finance-dock-btn accent"
+            onClick={() => setModal('revolut')}
+          >
+            <span className="finance-dock-kicker">Bank</span>
+            <span className="finance-dock-name">Sync Revolut</span>
+            {pendingReview > 0 ? <span className="finance-dock-badge">{pendingReview}</span> : null}
+          </button>
         </div>
-        <div className="finance-stat">
-          <span className="finance-stat-label">Cash spent</span>
-          <strong className="finance-stat-value">{formatMoney(spent)}</strong>
-        </div>
-      </div>
+      </header>
 
-      <section className="action-board">
-        <header className="action-board-head">
-          <h2 className="action-board-title">Actions</h2>
-          <p className="action-board-copy">Open only what you need. Keep the board clear.</p>
-        </header>
-        <div className="action-board-grid">
-          <button type="button" className="action-tile" onClick={() => setModal('allocate')}>
-            <span className="action-tile-kicker">Cash in</span>
-            <span className="action-tile-name">Allocate cash</span>
-            <span className="action-tile-desc">Split incoming money across buckets</span>
-          </button>
-          <button type="button" className="action-tile" onClick={() => setModal('expenses')}>
-            <span className="action-tile-kicker">Fixed</span>
-            <span className="action-tile-name">Set expenses</span>
-            <span className="action-tile-desc">Recurring budgets and micro-expenses</span>
-          </button>
-          <button type="button" className="action-tile" onClick={() => setModal('spend')}>
-            <span className="action-tile-kicker">Outflow</span>
-            <span className="action-tile-name">Log spend</span>
-            <span className="action-tile-desc">Daily cash tracker</span>
-          </button>
-          <button type="button" className="action-tile" onClick={() => setModal('wishlist')}>
-            <span className="action-tile-kicker">Want</span>
-            <span className="action-tile-name">Wishlist</span>
-            <span className="action-tile-desc">
-              {(ledger.wishlist?.length ?? 0) > 0
-                ? `${ledger.wishlist.length} item${ledger.wishlist.length === 1 ? '' : 's'} parked`
-                : 'Item + rough price before you buy'}
-            </span>
-          </button>
-          <button type="button" className="action-tile accent" onClick={() => setModal('revolut')}>
-            <span className="action-tile-kicker">Bank</span>
-            <span className="action-tile-name">Sync Revolut</span>
-            <span className="action-tile-desc">
-              {pendingReview > 0
-                ? `${pendingReview} transaction${pendingReview === 1 ? '' : 's'} to review`
-                : 'Connect, sync day, categorize'}
-            </span>
-          </button>
-        </div>
-      </section>
+      <PersonalFinanceDashboard store={store} />
 
       <Modal
         open={modal === 'allocate'}

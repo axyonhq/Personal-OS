@@ -90,6 +90,7 @@ import {
   recentSessions,
 } from '../utils/sessionAnalytics'
 import { revolutCredentialsChangedEvent } from '../utils/revolutApi'
+import { isInternalRevolutReviewItem } from '../lib/revolut/internal'
 import { isValidFocusNote, isValidSessionTarget } from '../utils/focusNote'
 import { repairJournalEntryDate } from '../utils/journalDate'
 
@@ -608,11 +609,66 @@ function migrateRevolutSync(
   fallback: RevolutSyncState,
 ): RevolutSyncState {
   if (!raw || typeof raw !== 'object') return fallback
+  const settledIds = [
+    ...new Set(
+      (Array.isArray(raw.settledIds) ? raw.settledIds : []).filter(
+        (id): id is string => typeof id === 'string' && id.length > 0,
+      ),
+    ),
+  ]
+  const settled = new Set(settledIds)
+  const keepQueue = (items: RevolutReviewItem[] | undefined) =>
+    (Array.isArray(items) ? items : []).filter(
+      (item) =>
+        item &&
+        typeof item.id === 'string' &&
+        !settled.has(item.id) &&
+        !settled.has(item.revolutTransactionId) &&
+        !isInternalRevolutReviewItem(item),
+    )
   return {
     personalAccountIds: Array.isArray(raw.personalAccountIds) ? raw.personalAccountIds : [],
-    personalQueue: Array.isArray(raw.personalQueue) ? raw.personalQueue : [],
-    // Drop legacy discard settlements — discarded txns should reappear on sync
-    settledIds: [],
+    personalQueue: keepQueue(raw.personalQueue),
+    settledIds,
+  }
+}
+
+function revolutSkipKeys(item: { id: string; revolutTransactionId?: string }): string[] {
+  return [item.id, item.revolutTransactionId].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0,
+  )
+}
+
+function collectLoggedRevolutIds(s: AppState): Set<string> {
+  const logged = new Set<string>(s.revolutSync.settledIds)
+  const add = (id?: string) => {
+    if (!id) return
+    logged.add(id)
+    const txnId = id.includes(':') ? id.split(':')[0] : ''
+    if (txnId) logged.add(txnId)
+  }
+  for (const spend of s.personalFinance.spends) add(spend.revolutId)
+  return logged
+}
+
+function withSettledIds(sync: RevolutSyncState, ids: string[]): RevolutSyncState {
+  const next = new Set(sync.settledIds)
+  for (const id of ids) {
+    if (id) next.add(id)
+  }
+  return { ...sync, settledIds: [...next] }
+}
+
+function dropSettledFromQueues(sync: RevolutSyncState): RevolutSyncState {
+  const settled = new Set(sync.settledIds)
+  return {
+    ...sync,
+    personalQueue: sync.personalQueue.filter(
+      (item) =>
+        !settled.has(item.id) &&
+        !settled.has(item.revolutTransactionId) &&
+        !isInternalRevolutReviewItem(item),
+    ),
   }
 }
 
@@ -688,6 +744,18 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     delete parsedClean[key]
   }
 
+  const personalNext = mergePersonalFoodAndDrink(personalFinance)
+  const revolutSync = dropSettledFromQueues(
+    withSettledIds(
+      migrateRevolutSync(parsed.revolutSync, seed.revolutSync),
+      personalNext.spends.flatMap((spend) => {
+        if (!spend.revolutId) return []
+        const txnId = spend.revolutId.includes(':') ? spend.revolutId.split(':')[0] : ''
+        return txnId ? [spend.revolutId, txnId] : [spend.revolutId]
+      }),
+    ),
+  )
+
   return {
     ...seed,
     ...(parsedClean as Partial<AppState>),
@@ -728,8 +796,8 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           : seed.lastSaturdayDumpSunday ?? null,
     autopilotCompletions: migrateAutopilotCompletions(parsed.autopilotCompletions),
     habits: migrateHabits(parsed.habits ?? seed.habits, today),
-    personalFinance: mergePersonalFoodAndDrink(personalFinance),
-    revolutSync: migrateRevolutSync(parsed.revolutSync, seed.revolutSync),
+    personalFinance: personalNext,
+    revolutSync,
     revolutCredentials: parsed.revolutCredentials,
     visionGoals: Array.isArray(parsed.visionGoals)
       ? (parsed.visionGoals as VisionGoal[])
@@ -2167,21 +2235,22 @@ export function useStore() {
   const mergeRevolutReviewItems = useCallback(
     (_realm: FinanceRealm, items: RevolutReviewItem[]) => {
       update((s) => {
-        // Only skip txns already logged as spends — discarded ones come back on re-sync
-        const logged = new Set<string>()
-        for (const spend of s.personalFinance.spends) {
-          if (spend.revolutId) logged.add(spend.revolutId)
-        }
-        const existing = new Map(s.revolutSync.personalQueue.map((item) => [item.id, item]))
+        const skipped = collectLoggedRevolutIds(s)
+        const existing = new Map(
+          s.revolutSync.personalQueue
+            .filter((item) => !isInternalRevolutReviewItem(item) && !skipped.has(item.id))
+            .map((item) => [item.id, item]),
+        )
         for (const item of items) {
-          if (logged.has(item.id)) continue
+          if (isInternalRevolutReviewItem(item)) continue
+          if (skipped.has(item.id) || skipped.has(item.revolutTransactionId)) continue
+          if (existing.has(item.id)) continue
           existing.set(item.id, item)
         }
         return {
           ...s,
           revolutSync: {
             ...s.revolutSync,
-            settledIds: [],
             personalQueue: [...existing.values()].sort((a, b) =>
               b.createdAt.localeCompare(a.createdAt),
             ),
@@ -2194,14 +2263,17 @@ export function useStore() {
 
   const discardRevolutReviewItem = useCallback(
     (_realm: FinanceRealm, id: string) => {
-      update((s) => ({
-        ...s,
-        revolutSync: {
-          ...s.revolutSync,
-          // Remove from queue only — do not permanently settle (re-sync can show again)
-          personalQueue: s.revolutSync.personalQueue.filter((item) => item.id !== id),
-        },
-      }))
+      update((s) => {
+        const item = s.revolutSync.personalQueue.find((row) => row.id === id)
+        const settle = item ? revolutSkipKeys(item) : [id]
+        return {
+          ...s,
+          revolutSync: {
+            ...withSettledIds(s.revolutSync, settle),
+            personalQueue: s.revolutSync.personalQueue.filter((row) => row.id !== id),
+          },
+        }
+      })
     },
     [update],
   )
@@ -2239,9 +2311,10 @@ export function useStore() {
           personalFinance: {
             ...s.personalFinance,
             spends: [entry, ...s.personalFinance.spends],
+            updatedAt: new Date().toISOString(),
           },
           revolutSync: {
-            ...s.revolutSync,
+            ...withSettledIds(s.revolutSync, revolutSkipKeys(item)),
             personalQueue: s.revolutSync.personalQueue.filter((row) => row.id !== id),
           },
         }
