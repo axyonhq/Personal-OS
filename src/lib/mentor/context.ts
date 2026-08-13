@@ -145,7 +145,7 @@ function spendingSummary(ledger: FinanceLedger | null | undefined, days = 30): s
   ].join(' ')
 }
 
-function journalDigest(entries: JournalEntry[], limit = 16): string {
+function journalDigest(entries: JournalEntry[], limit = 10): string {
   const ready = entries
     .filter((e) => e.status === 'extracted' && (e.extractedText || '').trim())
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
@@ -153,7 +153,7 @@ function journalDigest(entries: JournalEntry[], limit = 16): string {
   if (ready.length === 0) return 'No journal pages extracted yet.'
   return ready
     .map((e) => {
-      const body = (e.extractedText || '').trim().slice(0, 900)
+      const body = (e.extractedText || '').trim().slice(0, 500)
       const src =
         e.dateSource === 'extracted'
           ? `auto-dated${e.detectedDateRaw ? ` from "${e.detectedDateRaw}"` : ''}`
@@ -187,7 +187,7 @@ function reflectionDigest(reflections: Record<string, WeekReflection>): string {
     .join('\n\n')
 }
 
-function sessionLines(entries: TimeEntry[], limit = 40): string {
+function sessionLines(entries: TimeEntry[], limit = 30): string {
   return recentSessions(entries, limit)
     .map((e) => {
       const start =
@@ -206,9 +206,9 @@ function sessionLines(entries: TimeEntry[], limit = 40): string {
     .join('\n')
 }
 
-/** Compact operating dossier for Claude — pattern recognition fuel. */
+/** Compact operating dossier for the mentor model — pattern recognition fuel. */
 export function buildMentorContext(state: AppState): string {
-  const entries = state.timeEntries
+  const entries = state.timeEntries || []
   const withDebrief = entries.filter((e) => e.debrief)
   const stats = computeSessionStats(entries)
   const pauseStats = computePauseStats(entries)
@@ -294,7 +294,7 @@ export function buildMentorContext(state: AppState): string {
     .filter(Boolean)
     .join('\n')
 
-  const oneThingToday = state.dailyOneThing[todayDateKey()] || '(unset)'
+  const oneThingToday = state.dailyOneThing?.[todayDateKey()] || '(unset)'
 
   return [
     `# OPERATOR DOSSIER (Bali / ${APP_TIMEZONE})`,
@@ -336,7 +336,7 @@ export function buildMentorContext(state: AppState): string {
     `Feeling × length: ${correlateFeelingByDuration(entries).join('; ') || 'need more debriefs'}.`,
     '',
     '## Recent sessions (newest first)',
-    sessionLines(entries, 45) || '(none)',
+    sessionLines(entries, 30) || '(none)',
     '',
     '## Personal spending',
     spendingSummary(state.personalFinance),
@@ -377,7 +377,7 @@ export function formatInsightBrief(insight: MentorInsight): string {
   ].join('\n')
 }
 
-export const MENTOR_SYSTEM_PROMPT = `You are the Mentor inside Batcave — an elite performance OS for one operator. Your job is ruthless pattern recognition and blind-spot spotting.
+export const MENTOR_SYSTEM_PROMPT = `You are the Mentor inside Command Center — a personal OS for one operator. Your job is ruthless pattern recognition and blind-spot spotting.
 
 Tone: direct, precise, high-agency. No fluff, no corporate wellness speak, no emoji. Speak like a sharp coach who has read every session log, break, spend, and journal page. Call the operator on self-deception. Celebrate what makes them a weapon — then sharpen it.
 
@@ -393,8 +393,8 @@ When analyzing, hunt for:
 
 Keep replies dense and usable. Prefer short sections with hard edges over essays.`
 
-export const ANALYZE_JSON_INSTRUCTION = `Call the submit_mentor_synthesis tool exactly once with the full structured synthesis.
-Do not return markdown fences or freeform JSON outside the tool.
+export const ANALYZE_JSON_INSTRUCTION = `Return the full structured synthesis as JSON matching the required schema (or via the submit_mentor_synthesis tool when that tool is provided).
+Do not wrap it in markdown fences. Do not add extra keys.
 Fill every field with concrete, evidence-backed content from the dossier:
 - summary: 2-4 sentence read on how they currently operate
 - weapons: what makes them lethal

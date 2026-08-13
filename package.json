@@ -1,5 +1,5 @@
 {
-  "name": "axyon-command-os",
+  "name": "personal-os",
   "private": true,
   "version": "1.0.0",
   "scripts": {
@@ -9,13 +9,8 @@
     "lint": "oxlint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "@clerk/nextjs": "^7.6.2",
     "@supabase/supabase-js": "^2.110.9",
-    "@tiptap/extension-placeholder": "^3.29.2",
-    "@tiptap/pm": "^3.29.2",
-    "@tiptap/react": "^3.29.2",
-    "@tiptap/starter-kit": "^3.29.2",
     "heic-to": "^1.5.2",
     "next": "15.5.22",
     "openai": "^4.104.0",

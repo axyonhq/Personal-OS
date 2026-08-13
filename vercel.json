@@ -3,15 +3,5 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "outputDirectory": null,
-  "crons": [
-    {
-      "path": "/api/chief-of-staff/cron",
-      "schedule": "5 23 * * *"
-    },
-    {
-      "path": "/api/chief-of-staff/cron",
-      "schedule": "5 14 * * *"
-    }
-  ]
+  "outputDirectory": null
 }

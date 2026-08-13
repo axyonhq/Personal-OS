@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  getAnthropicClient,
-  MENTOR_MODEL,
+  formatOpenAIError,
+  getMentorOpenAIClient,
+  MENTOR_OPENAI_MODEL,
   mentorNotConfiguredResponse,
-} from '@/lib/mentor/anthropic'
+} from '@/lib/mentor/openai'
 import { MENTOR_SYSTEM_PROMPT } from '@/lib/mentor/context'
 
 export const runtime = 'nodejs'
@@ -13,7 +14,7 @@ type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
 export async function POST(req: NextRequest) {
   try {
-    const client = getAnthropicClient()
+    const client = getMentorOpenAIClient()
     if (!client) return mentorNotConfiguredResponse()
 
     const body = (await req.json()) as {
@@ -47,18 +48,17 @@ export async function POST(req: NextRequest) {
       context || '(dossier empty)',
     ].join('\n')
 
-    const response = await client.messages.create({
-      model: MENTOR_MODEL,
-      max_tokens: 1600,
-      system,
-      messages: [...history, { role: 'user', content: message }],
+    const response = await client.chat.completions.create({
+      model: MENTOR_OPENAI_MODEL,
+      max_completion_tokens: 1600,
+      messages: [
+        { role: 'system', content: system },
+        ...history.map((t) => ({ role: t.role, content: t.content })),
+        { role: 'user', content: message },
+      ],
     })
 
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim()
+    const text = (response.choices[0]?.message?.content || '').trim()
 
     if (!text) {
       return NextResponse.json({ error: 'Empty mentor response' }, { status: 502 })
@@ -67,7 +67,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: text })
   } catch (error) {
     console.error('mentor chat failed', error)
-    const message = error instanceof Error ? error.message : 'Mentor chat failed'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatOpenAIError(error) }, { status: 500 })
   }
 }

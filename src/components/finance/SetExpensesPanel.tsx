@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Store } from '../../hooks/useStore'
-import type { ExpenseCategory, ExpenseFrequency, FinanceRealm } from '../../types'
+import type { ExpenseCategory, ExpenseFrequency } from '../../types'
 import {
   categoryEffectiveAmount,
   childCategories,
@@ -11,6 +11,8 @@ import {
   totalMonthlyExpenses,
 } from '../../utils/finance'
 import { HudPanel } from '../HudPanel'
+
+const REALM = 'personal' as const
 
 function AmountField({
   value,
@@ -106,14 +108,12 @@ function NameField({
 
 export function SetExpensesPanel({
   store,
-  realm,
   embedded = false,
 }: {
   store: Store
-  realm: FinanceRealm
   embedded?: boolean
 }) {
-  const ledger = store.financeFor(realm)
+  const ledger = store.financeFor(REALM)
   const tops = topLevelCategories(ledger)
   const monthlyTotal = totalMonthlyExpenses(ledger)
 
@@ -125,14 +125,14 @@ export function SetExpensesPanel({
   const [microAmount, setMicroAmount] = useState('')
 
   const patch = (id: string, next: Partial<Pick<ExpenseCategory, 'name' | 'frequency' | 'amount'>>) => {
-    store.updateExpenseCategory(realm, id, next)
+    store.updateExpenseCategory(REALM, id, next)
   }
 
   const submitCategory = (e: FormEvent) => {
     e.preventDefault()
     const parsed = parseAmount(amount)
     if (!name.trim() || parsed === null) return
-    store.addExpenseCategory(realm, { name, frequency, amount: parsed })
+    store.addExpenseCategory(REALM, { name, frequency, amount: parsed })
     setName('')
     setAmount('')
     setFrequency('monthly')
@@ -144,7 +144,7 @@ export function SetExpensesPanel({
     const parsed = parseAmount(microAmount)
     if (!microName.trim() || parsed === null) return
     const parent = ledger.categories.find((c) => c.id === microParentId)
-    store.addExpenseCategory(realm, {
+    store.addExpenseCategory(REALM, {
       name: microName,
       frequency: parent?.frequency ?? 'monthly',
       amount: parsed,
@@ -220,7 +220,7 @@ export function SetExpensesPanel({
                     type="button"
                     className="x-btn visible"
                     aria-label={`Remove ${cat.name}`}
-                    onClick={() => store.removeExpenseCategory(realm, cat.id)}
+                    onClick={() => store.removeExpenseCategory(REALM, cat.id)}
                   >
                     ×
                   </button>
@@ -245,7 +245,7 @@ export function SetExpensesPanel({
                         type="button"
                         className="x-btn visible"
                         aria-label={`Remove ${kid.name}`}
-                        onClick={() => store.removeExpenseCategory(realm, kid.id)}
+                        onClick={() => store.removeExpenseCategory(REALM, kid.id)}
                       >
                         ×
                       </button>

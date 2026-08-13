@@ -38,7 +38,7 @@ export function asStringArray(value: unknown): string[] {
   return value.map((item) => asText(item)).filter(Boolean).slice(0, 12)
 }
 
-/** Coerce Anthropic tool_use.input (object or JSON string) into a plain record. */
+/** Coerce tool input (object or JSON string) into a plain record. */
 export function coerceToolInput(input: unknown): Record<string, unknown> | null {
   if (!input) return null
   if (typeof input === 'string') return parseJsonRecord(input)

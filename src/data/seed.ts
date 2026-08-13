@@ -1,5 +1,4 @@
 import {
-  emptyChiefOfStaffState,
   emptyMentorState,
   type AppState,
   type Project,
@@ -81,7 +80,6 @@ function sessionEntry(
 
 export function createSeedState(): AppState {
   const personalBillsId = uid('cat')
-  const companyBillsId = uid('cat')
   const today = todayDateKey()
   return {
     selectedDate: today,
@@ -247,21 +245,12 @@ export function createSeedState(): AppState {
     lastSaturdayDumpSunday: null,
     autopilotCompletions: { ...EMPTY_AUTOPILOT_COMPLETIONS },
     personalFinance: emptyFinanceLedger(personalBillsId),
-    companyFinance: emptyFinanceLedger(companyBillsId),
     revolutSync: {
       personalAccountIds: [],
-      companyAccountIds: [],
       personalQueue: [],
-      companyQueue: [],
       settledIds: [],
     },
     visionGoals: [],
-    companyDocuments: [],
-    companyIdeas: [],
-    companyLogins: [],
-    companyDecisions: [],
-    coldEmailDomains: [],
     mentor: emptyMentorState(),
-    chiefOfStaff: emptyChiefOfStaffState(),
   }
 }

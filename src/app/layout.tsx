@@ -22,14 +22,14 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'AXYON — Command OS',
-  description: 'Company OS and personal command center',
+  title: 'Command Center — Personal OS',
+  description: 'Personal command center OS',
   icons: {
-    icon: '/axyon-mark.svg',
+    icon: '/favicon.svg',
   },
   appleWebApp: {
     capable: true,
-    title: 'AXYON',
+    title: 'Command Center',
     statusBarStyle: 'black-translucent',
   },
   formatDetection: {

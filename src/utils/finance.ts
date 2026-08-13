@@ -295,114 +295,6 @@ export function categoryBudgetRows(ledger: FinanceLedger, date: string): Categor
   })
 }
 
-const PERSONAL_KEEP_NAMES = new Set([
-  'bills',
-  'food',
-  'drink',
-  'foods',
-  'drinks',
-  'food and drink',
-  'food and drinks',
-  'foods and drinks',
-  'food drink',
-])
-
-const COMPANY_EXPENSE_NAMES = new Set([
-  'ads',
-  'meta ads',
-  'facebook ads',
-  'google ads',
-  'payroll',
-  'contractors',
-  'contractor',
-  'software',
-  'saas',
-  'hosting',
-  'domains',
-  'domain',
-  'stripe',
-  'agency',
-  'media buy',
-  'media buying',
-  'cold email',
-  'axyon',
-  'cogs',
-  'inventory',
-  'fulfilment',
-  'fulfillment',
-  'office',
-  'employees',
-  'salaries',
-  'salary',
-  'tools',
-  'ops',
-  'operations',
-])
-
-/**
- * Drop company set-expenses that were copied into the personal ledger.
- * Keeps personal Bills / Food & Drink. Unused mirrored names go too.
- * Spends against removed cats become unexpected so history stays.
- */
-export function stripCopiedCompanyCategories(
-  personal: FinanceLedger,
-  company: FinanceLedger,
-): FinanceLedger {
-  const companyIds = new Set(company.categories.map((c) => c.id))
-  const companyNames = new Set(
-    company.categories
-      .map((c) => normalizeExpenseName(c.name))
-      .filter((n) => n && !PERSONAL_KEEP_NAMES.has(n)),
-  )
-  const usedPersonalIds = new Set(
-    personal.spends
-      .filter((s) => s.kind === 'category' && s.categoryId)
-      .map((s) => s.categoryId as string),
-  )
-
-  const removeIds = new Set<string>()
-  for (const cat of personal.categories) {
-    const name = normalizeExpenseName(cat.name)
-    if (cat.isPreset || PERSONAL_KEEP_NAMES.has(name)) continue
-    const copiedId = companyIds.has(cat.id)
-    const unusedMirror = companyNames.has(name) && !usedPersonalIds.has(cat.id)
-    const companyNamed = COMPANY_EXPENSE_NAMES.has(name)
-    if (copiedId || unusedMirror || companyNamed) removeIds.add(cat.id)
-  }
-  for (const cat of personal.categories) {
-    if (cat.parentId && removeIds.has(cat.parentId)) removeIds.add(cat.id)
-  }
-  if (removeIds.size === 0) return personal
-
-  return {
-    ...personal,
-    categories: personal.categories.filter((c) => !removeIds.has(c.id)),
-    spends: personal.spends.map((s) => {
-      if (s.kind !== 'category' || !s.categoryId || !removeIds.has(s.categoryId)) return s
-      return {
-        ...s,
-        kind: 'unexpected',
-        categoryId: undefined,
-        label: s.label || s.note || 'Spend',
-      }
-    }),
-    allocations: personal.allocations.map((a) => ({
-      ...a,
-      lines: a.lines.map((line) => {
-        if (line.kind !== 'category' || !line.categoryId || !removeIds.has(line.categoryId)) {
-          return line
-        }
-        return {
-          ...line,
-          kind: 'custom' as const,
-          customLabel: 'Unassigned',
-          categoryId: undefined,
-        }
-      }),
-    })),
-  }
-}
-
 export function emptyFinanceLedger(billsId: string): FinanceLedger {
   return {
     categories: [
@@ -417,6 +309,7 @@ export function emptyFinanceLedger(billsId: string): FinanceLedger {
     allocations: [],
     spends: [],
     wishlist: [],
+    updatedAt: new Date().toISOString(),
   }
 }
 
@@ -478,9 +371,12 @@ function isFoodAndDrinkName(name: string): boolean {
 }
 
 /**
- * Hard-merge personal Food + Drink into one weekly fixed expense ($185),
- * remapping every spend / allocation line so history and weekly progress stay intact.
- * Idempotent — safe to run on every load.
+ * One-time merge of legacy personal Food + Drink rows into a single top-level
+ * "Food & Drink" category. Remaps spends / allocations onto the keeper.
+ *
+ * After the categories are already combined, leave the user's amount and
+ * frequency alone — never force $185 weekly on every load (that made edits
+ * look like they "always revert").
  */
 export function mergePersonalFoodAndDrink(ledger: FinanceLedger): FinanceLedger {
   const COMBINED_NAME = 'Food & Drink'
@@ -492,12 +388,9 @@ export function mergePersonalFoodAndDrink(ledger: FinanceLedger): FinanceLedger 
   )
   if (foodLike.length === 0) return ledger
 
+  // Already a single Food & Drink bucket — migration done; do not overwrite edits.
   const alreadyCombined =
-    foodLike.length === 1 &&
-    isFoodAndDrinkName(foodLike[0].name) &&
-    foodLike[0].frequency === COMBINED_FREQUENCY &&
-    foodLike[0].amount === COMBINED_AMOUNT &&
-    !foodLike[0].parentId
+    foodLike.length === 1 && isFoodAndDrinkName(foodLike[0].name) && !foodLike[0].parentId
 
   if (alreadyCombined) return ledger
 
@@ -516,6 +409,10 @@ export function mergePersonalFoodAndDrink(ledger: FinanceLedger): FinanceLedger 
     if (cat.parentId && absorbIds.has(cat.parentId)) absorbIds.add(cat.id)
   }
 
+  // First-time merge only: seed the default weekly $185 when collapsing Food+Drink.
+  // If the keeper was already named Food & Drink, keep its amount/frequency.
+  const seedDefaults = !isFoodAndDrinkName(keeper.name)
+
   const categories = ledger.categories
     .filter((c) => !absorbIds.has(c.id))
     .map((c) => {
@@ -528,12 +425,11 @@ export function mergePersonalFoodAndDrink(ledger: FinanceLedger): FinanceLedger 
       return {
         ...c,
         name: COMBINED_NAME,
-        frequency: COMBINED_FREQUENCY,
-        amount: COMBINED_AMOUNT,
+        frequency: seedDefaults ? COMBINED_FREQUENCY : c.frequency,
+        amount: seedDefaults ? COMBINED_AMOUNT : c.amount,
         parentId: undefined,
       }
     })
-
   const spends = ledger.spends.map((s) => {
     if (s.kind !== 'category' || !s.categoryId || !absorbIds.has(s.categoryId)) return s
     return { ...s, categoryId: keeper.id }

@@ -1,4 +1,10 @@
-import type { ActiveTimer, AppState, FinanceLedger, RevolutCredentials, TimeEntry } from '@/types'
+import type {
+  ActiveTimer,
+  AppState,
+  FinanceLedger,
+  RevolutCredentials,
+  TimeEntry,
+} from '@/types'
 import {
   loadRevolutAppSecret,
   loadRevolutRefreshToken,
@@ -41,13 +47,147 @@ export function pickActiveTimer(
   return local ?? remote ?? null
 }
 
+/** True when the ledger has more than a bare empty Bills preset. */
+export function isRichFinanceLedger(ledger: FinanceLedger | undefined | null): boolean {
+  if (!ledger) return false
+  const cats = ledger.categories || []
+  if ((ledger.wishlist?.length || 0) > 0) return true
+  if ((ledger.allocations?.length || 0) > 0) return true
+  if ((ledger.spends?.length || 0) > 0) return true
+  if (cats.length === 0) return false
+  if (cats.length > 1) return true
+  const only = cats[0]
+  if (!only) return false
+  if (only.name.toLowerCase() !== 'bills') return true
+  if (only.amount > 0) return true
+  return cats.some((c) => c.parentId)
+}
+
 /**
- * After preferRicherState picks a base snapshot, fold in sessions + live timers
- * from the other side so cloud hydrate cannot erase in-progress or just-finished work.
+ * Prefer the newer finance ledger when updatedAt exists; else the richer
+ * structure. preferOtherOnTie keeps in-memory edits after hydrate/save.
+ */
+export function mergeFinanceLedgers(
+  base: FinanceLedger,
+  other: FinanceLedger,
+  options?: { preferOtherOnTie?: boolean },
+): FinanceLedger {
+  const baseAt = Date.parse(base?.updatedAt || '') || 0
+  const otherAt = Date.parse(other?.updatedAt || '') || 0
+  if (otherAt > baseAt) return other
+  if (baseAt > otherAt) return base
+
+  const baseScore = ledgerScore(base)
+  const otherScore = ledgerScore(other)
+  if (otherScore > baseScore) return other
+  if (baseScore > otherScore) return base
+
+  return options?.preferOtherOnTie ? other : base
+}
+
+/**
+ * Local/backup recovery helper: never let an empty seed wipe a rich ledger,
+ * even when the empty side has a newer updatedAt (common after strip/reseed).
+ * When both are rich, fall through to updatedAt-aware merge.
+ */
+export function preferRicherFinanceLedger(
+  current: FinanceLedger,
+  candidate: FinanceLedger,
+): FinanceLedger {
+  const currentRich = isRichFinanceLedger(current)
+  const candidateRich = isRichFinanceLedger(candidate)
+  if (!currentRich && candidateRich) return candidate
+  if (currentRich && !candidateRich) return current
+  return mergeFinanceLedgers(current, candidate)
+}
+
+function isBillsPreset(cat: FinanceLedger['categories'][number]): boolean {
+  return Boolean(cat.isPreset && !cat.parentId && cat.name.toLowerCase() === 'bills')
+}
+
+/**
+ * Fold a legacy company finance ledger into personal after the company tab
+ * was removed. Unions categories / wishlist / cash rows so neither side is
+ * dropped when both have real data.
+ */
+export function absorbLegacyCompanyFinance(
+  personal: FinanceLedger,
+  company: FinanceLedger | undefined | null,
+): FinanceLedger {
+  if (!company || !isRichFinanceLedger(company)) return personal
+  const migratedAt = new Date().toISOString()
+  if (!isRichFinanceLedger(personal)) {
+    // Stamp now so a newer empty local seed cannot win the next hydrate fold.
+    return { ...company, updatedAt: migratedAt }
+  }
+
+  const personalBills = personal.categories.find(isBillsPreset)
+  const companyBills = company.categories.find(isBillsPreset)
+  const billsIdRemap =
+    personalBills && companyBills && personalBills.id !== companyBills.id
+      ? companyBills.id
+      : null
+
+  const byId = new Map(personal.categories.map((c) => [c.id, c]))
+  for (const cat of company.categories) {
+    if (billsIdRemap && cat.id === billsIdRemap) {
+      // Keep personal Bills preset; fold company Bills amount if personal is $0.
+      if (personalBills && personalBills.amount <= 0 && cat.amount > 0) {
+        byId.set(personalBills.id, { ...personalBills, amount: cat.amount })
+      }
+      continue
+    }
+    const remapped =
+      billsIdRemap && cat.parentId === billsIdRemap
+        ? { ...cat, parentId: personalBills!.id }
+        : cat
+    if (!byId.has(remapped.id)) {
+      byId.set(remapped.id, remapped)
+      continue
+    }
+    // Same id on both sides — keep the higher amount / non-empty name.
+    const existing = byId.get(remapped.id)!
+    byId.set(remapped.id, {
+      ...existing,
+      amount: Math.max(existing.amount || 0, remapped.amount || 0),
+      name: existing.name?.trim() ? existing.name : remapped.name,
+      frequency: existing.frequency || remapped.frequency,
+      parentId: existing.parentId ?? remapped.parentId,
+      isPreset: existing.isPreset || remapped.isPreset,
+    })
+  }
+
+  const allocById = new Map((personal.allocations || []).map((a) => [a.id, a]))
+  for (const a of company.allocations || []) {
+    if (a?.id && !allocById.has(a.id)) allocById.set(a.id, a)
+  }
+  const spendById = new Map((personal.spends || []).map((s) => [s.id, s]))
+  for (const s of company.spends || []) {
+    if (s?.id && !spendById.has(s.id)) spendById.set(s.id, s)
+  }
+  const wishById = new Map((personal.wishlist || []).map((w) => [w.id, w]))
+  for (const w of company.wishlist || []) {
+    if (w?.id && !wishById.has(w.id)) wishById.set(w.id, w)
+  }
+
+  return {
+    categories: Array.from(byId.values()),
+    allocations: Array.from(allocById.values()),
+    spends: Array.from(spendById.values()),
+    wishlist: Array.from(wishById.values()),
+    updatedAt: migratedAt,
+  }
+}
+
+/**
+ * After preferRicherState picks a base snapshot, fold in sessions, live timers,
+ * and personal finance ledgers from the other side so cloud hydrate cannot erase
+ * in-progress work or roll amounts / new expenses back.
  *
  * timerMode:
  * - prefer-either: keep a timer if either side has one (default for local↔remote)
- * - prefer-other: other is authoritative (use after hydrate so discard/finish stick)
+ * - prefer-other: other is authoritative (use after hydrate so discard/finish /
+ *   just-added expenses stick)
  */
 export function mergeSessionSafeState(
   base: AppState,
@@ -55,6 +195,12 @@ export function mergeSessionSafeState(
   options?: { timerMode?: 'prefer-either' | 'prefer-other' },
 ): AppState {
   const timerMode = options?.timerMode ?? 'prefer-either'
+  // After hydrate/save, memory is the source of truth for finance — a richer
+  // remote snapshot must not delete an expense you just added.
+  const personalFinance =
+    timerMode === 'prefer-other'
+      ? other.personalFinance
+      : mergeFinanceLedgers(base.personalFinance, other.personalFinance)
   return {
     ...base,
     timeEntries: mergeTimeEntries(base.timeEntries, other.timeEntries),
@@ -62,6 +208,7 @@ export function mergeSessionSafeState(
       timerMode === 'prefer-other'
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
+    personalFinance,
   }
 }
 
@@ -104,9 +251,7 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
   const tasks = state.tasks
     ? Object.values(state.tasks).reduce((n, list) => n + (list?.length || 0), 0)
     : 0
-  const revolutAccounts =
-    (state.revolutSync?.personalAccountIds?.length || 0) +
-    (state.revolutSync?.companyAccountIds?.length || 0)
+  const revolutAccounts = state.revolutSync?.personalAccountIds?.length || 0
   const credentials =
     (state.revolutCredentials?.appSecret ? 8 : 0) +
     (state.revolutCredentials?.refreshToken ? 12 : 0)
@@ -119,24 +264,13 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     (state.habits?.filter((h) => (h.streak || 0) > 0 || h.lastCompletedDate).length || 0) * 3 +
     Object.keys(state.dailyOneThing || {}).length * 2 +
     ledgerScore(state.personalFinance) +
-    ledgerScore(state.companyFinance) +
     revolutAccounts * 10 +
     (state.revolutSync?.personalQueue?.length || 0) +
-    (state.revolutSync?.companyQueue?.length || 0) +
     credentials +
     (state.weekIntention && state.weekIntention.length > 40 ? 2 : 0) +
-    (state.companyDocuments?.length || 0) * 5 +
-    (state.companyIdeas?.length || 0) * 3 +
-    (state.companyLogins?.length || 0) * 4 +
-    (state.companyDecisions?.length || 0) * 4 +
-    (state.coldEmailDomains?.length || 0) * 4 +
-    (state.coldEmailDomains?.reduce((n, d) => n + (d.mailboxes?.length || 0), 0) || 0) * 2 +
     (state.mentor?.journalEntries?.length || 0) * 4 +
     (state.mentor?.messages?.length || 0) +
     (state.mentor?.latestInsight ? 6 : 0) +
-    (state.chiefOfStaff?.briefs?.length || 0) * 2 +
-    (state.chiefOfStaff?.messages?.length || 0) +
-    (state.chiefOfStaff?.latestInsight ? 6 : 0) +
     (state.timeEntries?.filter((e) => e.debrief).length || 0) * 3 +
     Object.keys(state.bodyLogs || {}).length * 2
   )

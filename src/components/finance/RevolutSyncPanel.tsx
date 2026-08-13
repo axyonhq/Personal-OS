@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Store } from '../../hooks/useStore'
-import type { FinanceRealm } from '../../types'
 import {
   childCategories,
   formatMoney,
@@ -27,29 +26,25 @@ import { todayDateKey } from '../../utils/time'
 import { HudPanel } from '../HudPanel'
 
 const UNEXPECTED = REVOLUT_UNEXPECTED
+const REALM = 'personal' as const
 
 type CategoryPick = RevolutCategoryPick
 
 export function RevolutSyncPanel({
   store,
-  realm,
   onSynced,
   embedded = false,
 }: {
   store: Store
-  realm: FinanceRealm
-  /** Fired after a successful day sync (e.g. refresh company balances). */
+  /** Fired after a successful day sync. */
   onSynced?: () => void
   embedded?: boolean
 }) {
   const sync = store.state.revolutSync
-  const accountIdsKey = realm === 'personal' ? 'personalAccountIds' : 'companyAccountIds'
-  const queueKey = realm === 'personal' ? 'personalQueue' : 'companyQueue'
-  const savedIds = sync[accountIdsKey]
-  const queue = sync[queueKey].filter((item) => !isInternalRevolutReviewItem(item))
-  const ledger = store.financeFor(realm)
+  const savedIds = sync.personalAccountIds
+  const queue = sync.personalQueue.filter((item) => !isInternalRevolutReviewItem(item))
+  const ledger = store.financeFor(REALM)
   const tops = topLevelCategories(ledger)
-  const realmLabel = realm === 'personal' ? 'personal' : 'company'
 
   const [appSecret, setAppSecret] = useState(() => loadRevolutAppSecret())
   const [secretDraft, setSecretDraft] = useState('')
@@ -189,11 +184,11 @@ export function RevolutSyncPanel({
       setError('Select at least one account.')
       return
     }
-    store.setRevolutAccountIds(realm, draftIds)
+    store.setRevolutAccountIds(REALM, draftIds)
     setEditingAccounts(false)
     setError('')
     setMessage(
-      `Saved ${draftIds.length} account${draftIds.length === 1 ? '' : 's'} for ${realmLabel}.`,
+      `Saved ${draftIds.length} account${draftIds.length === 1 ? '' : 's'}.`,
     )
   }
 
@@ -211,7 +206,7 @@ export function RevolutSyncPanel({
     setMessage('')
     try {
       const result = await fetchRevolutTransactions(appSecret, date, savedIds)
-      store.mergeRevolutReviewItems(realm, result.transactions)
+      store.mergeRevolutReviewItems(REALM, result.transactions)
       const pendingOut = result.transactions.filter((t) => t.direction === 'out').length
       const pendingIn = result.transactions.filter((t) => t.direction === 'in').length
       setMessage(
@@ -250,7 +245,7 @@ export function RevolutSyncPanel({
     const pick = getPick(itemId)
     if (pick.topId === UNEXPECTED) {
       const item = queue.find((q) => q.id === itemId)
-      store.categorizeRevolutReviewItem(realm, itemId, {
+      store.categorizeRevolutReviewItem(REALM, itemId, {
         kind: 'unexpected',
         label: item?.merchant || item?.description || 'Revolut spend',
       })
@@ -258,14 +253,11 @@ export function RevolutSyncPanel({
     }
 
     const kids = childCategories(ledger, pick.topId)
-    store.categorizeRevolutReviewItem(realm, itemId, {
+    store.categorizeRevolutReviewItem(REALM, itemId, {
       kind: 'category',
       categoryId: pick.childId && kids.some((k) => k.id === pick.childId) ? pick.childId : pick.topId,
     })
   }
-
-  const otherRealmIds =
-    realm === 'personal' ? sync.companyAccountIds : sync.personalAccountIds
 
   return (
     <HudPanel
@@ -342,13 +334,12 @@ export function RevolutSyncPanel({
       {appSecret && statusOk && editingAccounts && (
         <div className="revolut-card">
           <div className="revolut-card-head">
-            <h3>Accounts for {realmLabel}</h3>
-            <p>Tick the Revolut accounts to sync into this tab, then save.</p>
+            <h3>Accounts</h3>
+            <p>Tick the Revolut accounts to sync, then save.</p>
           </div>
           <ul className="revolut-account-grid">
             {accounts.map((account) => {
               const checked = draftIds.includes(account.id)
-              const elsewhere = otherRealmIds.includes(account.id)
               return (
                 <li key={account.id}>
                   <label className={`revolut-account-tile${checked ? ' on' : ''}`}>
@@ -361,9 +352,6 @@ export function RevolutSyncPanel({
                       <span className="revolut-account-name">{account.name}</span>
                       <span className="revolut-account-meta">
                         {account.currency} · {formatMoney(account.balance)}
-                        {elsewhere
-                          ? ` · also in ${realm === 'personal' ? 'company' : 'personal'}`
-                          : ''}
                       </span>
                     </span>
                   </label>
@@ -466,7 +454,7 @@ export function RevolutSyncPanel({
 
       {!appSecret && (
         <p className="finance-hint revolut-hint">
-          One-time setup for {realmLabel}: connect, pick accounts, save. After that just sync.
+          One-time setup: connect, pick accounts, save. After that just sync.
         </p>
       )}
 
@@ -566,7 +554,7 @@ export function RevolutSyncPanel({
                         <button
                           type="button"
                           className="btn-secondary compact"
-                          onClick={() => store.discardRevolutReviewItem(realm, item.id)}
+                          onClick={() => store.discardRevolutReviewItem(REALM, item.id)}
                         >
                           Discard
                         </button>
@@ -577,7 +565,7 @@ export function RevolutSyncPanel({
                         <button
                           type="button"
                           className="btn-secondary compact"
-                          onClick={() => store.discardRevolutReviewItem(realm, item.id)}
+                          onClick={() => store.discardRevolutReviewItem(REALM, item.id)}
                         >
                           Discard
                         </button>

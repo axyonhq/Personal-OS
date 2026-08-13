@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Store } from '../hooks/useStore'
 import { buildMentorContext } from '../lib/mentor/context'
+import { clipMentorContext } from '../lib/mentor/clipContext'
 import type { MentorCharge, MentorChargeInstall, MentorInsight } from '../types'
 import { addDays, todayDateKey } from '../utils/time'
 import { JournalCapture } from './JournalCapture'
@@ -106,11 +107,25 @@ export function MentorView({ store }: { store: Store }) {
     })
 
     try {
+      let context = ''
+      try {
+        // Clip before upload so the request itself stays small/fast.
+        context = clipMentorContext(buildMentorContext(store.state))
+      } catch (contextErr) {
+        throw new Error(
+          contextErr instanceof Error
+            ? `Could not build mentor dossier: ${contextErr.message}`
+            : 'Could not build mentor dossier',
+        )
+      }
+
       const res = await fetch('/api/mentor/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: buildMentorContext(store.state) }),
+        body: JSON.stringify({ context }),
+        signal: AbortSignal.timeout(110_000),
       })
+      const rawBody = await res.text()
       let data: {
         insight?: {
           summary: string
@@ -122,10 +137,21 @@ export function MentorView({ store }: { store: Store }) {
         }
         error?: string
         raw?: string
+        code?: string
       } = {}
       try {
-        data = (await res.json()) as typeof data
+        data = rawBody ? (JSON.parse(rawBody) as typeof data) : {}
       } catch {
+        // Vercel gateway timeouts often return HTML starting with "An error…"
+        if (
+          res.status === 504 ||
+          res.status === 408 ||
+          /timed?\s*out|gateway|an error o/i.test(rawBody.slice(0, 120))
+        ) {
+          throw new Error(
+            'Synthesis timed out. The dossier may be too large — try again in a moment.',
+          )
+        }
         throw new Error(
           res.ok
             ? 'Synthesis returned an unreadable response'
@@ -133,6 +159,16 @@ export function MentorView({ store }: { store: Store }) {
         )
       }
       if (!res.ok || !data.insight) {
+        if (
+          res.status === 504 ||
+          res.status === 408 ||
+          data.code === 'synthesis_timeout'
+        ) {
+          throw new Error(
+            data.error ||
+              'Synthesis timed out. The dossier may be too large — try again in a moment.',
+          )
+        }
         const detail = data.raw?.trim()
           ? `${data.error || 'Synthesis failed'} (${data.raw.slice(0, 160)}…)`
           : data.error
@@ -169,7 +205,15 @@ export function MentorView({ store }: { store: Store }) {
         })
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Synthesis failed'
+      const message =
+        err instanceof Error &&
+        (err.name === 'TimeoutError' ||
+          err.name === 'AbortError' ||
+          /aborted|timed?\s*out/i.test(err.message))
+          ? 'Synthesis timed out. The dossier may be too large — try again in a moment.'
+          : err instanceof Error
+            ? err.message
+            : 'Synthesis failed'
       setError(message)
       store.appendMentorMessage({
         role: 'system',
