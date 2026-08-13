@@ -7,6 +7,7 @@ import {
   refreshTokenFromRequest,
   withRotatedToken,
 } from '@/lib/revolut/client'
+import { isInternalRevolutTransaction } from '@/lib/revolut/internal'
 
 function normalizeAccountIds(raw: string | null) {
   if (!raw) return []
@@ -34,7 +35,10 @@ function normalizeTransaction(
   accountNames: Map<string, string>,
   dateKey: string,
   accountFilter: Set<string>,
+  ownAccountIds: Set<string>,
 ) {
+  if (isInternalRevolutTransaction(txn, ownAccountIds)) return []
+
   const merchant = txn.merchant?.name?.trim() || ''
   const items = []
 
@@ -63,6 +67,7 @@ function normalizeTransaction(
       description,
       reference: txn.reference,
       cardLastFour: txn.card?.card_number?.slice(-4),
+      internal: false,
     })
   }
 
@@ -104,6 +109,7 @@ export async function GET(req: NextRequest) {
     const accounts = await client.listAccounts()
     const accountNames = new Map(accounts.map((a) => [a.id, a.name]))
     const accountFilter = new Set(accountIds)
+    const ownAccountIds = new Set(accounts.map((a) => a.id))
 
     const unknown = accountIds.filter((id) => !accountNames.has(id))
     if (unknown.length) {
@@ -116,7 +122,13 @@ export async function GET(req: NextRequest) {
     for (const accountId of accountIds) {
       const raw = await client.listTransactionsForAccount({ accountId, from, to })
       for (const txn of raw) {
-        for (const item of normalizeTransaction(txn, accountNames, date, accountFilter)) {
+        for (const item of normalizeTransaction(
+          txn,
+          accountNames,
+          date,
+          accountFilter,
+          ownAccountIds,
+        )) {
           if (seen.has(item.id)) continue
           seen.add(item.id)
           transactions.push(item)

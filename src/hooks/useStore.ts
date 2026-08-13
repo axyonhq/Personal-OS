@@ -79,7 +79,7 @@ import {
   SESSION_TAGS,
   cosBriefKey,
 } from '../types'
-import { mergePersonalFoodAndDrink, migrateWishlist } from '../utils/finance'
+import { mergePersonalFoodAndDrink, migrateWishlist, stripCopiedCompanyCategories } from '../utils/finance'
 import {
   addDays,
   parseDateKey,
@@ -101,6 +101,7 @@ import {
   recentSessions,
 } from '../utils/sessionAnalytics'
 import { revolutCredentialsChangedEvent } from '../utils/revolutApi'
+import { isInternalRevolutReviewItem } from '../lib/revolut/internal'
 import { isValidFocusNote, isValidSessionTarget } from '../utils/focusNote'
 import { repairJournalEntryDate } from '../utils/journalDate'
 
@@ -728,13 +729,29 @@ function migrateRevolutSync(
   fallback: RevolutSyncState,
 ): RevolutSyncState {
   if (!raw || typeof raw !== 'object') return fallback
+  const settledIds = [
+    ...new Set(
+      (Array.isArray(raw.settledIds) ? raw.settledIds : []).filter(
+        (id): id is string => typeof id === 'string' && id.length > 0,
+      ),
+    ),
+  ]
+  const settled = new Set(settledIds)
+  const keepQueue = (items: RevolutReviewItem[] | undefined) =>
+    (Array.isArray(items) ? items : []).filter(
+      (item) =>
+        item &&
+        typeof item.id === 'string' &&
+        !settled.has(item.id) &&
+        !settled.has(item.revolutTransactionId) &&
+        !isInternalRevolutReviewItem(item),
+    )
   return {
     personalAccountIds: Array.isArray(raw.personalAccountIds) ? raw.personalAccountIds : [],
     companyAccountIds: Array.isArray(raw.companyAccountIds) ? raw.companyAccountIds : [],
-    personalQueue: Array.isArray(raw.personalQueue) ? raw.personalQueue : [],
-    companyQueue: Array.isArray(raw.companyQueue) ? raw.companyQueue : [],
-    // Drop legacy discard settlements — discarded txns should reappear on sync
-    settledIds: [],
+    personalQueue: keepQueue(raw.personalQueue),
+    companyQueue: keepQueue(raw.companyQueue),
+    settledIds,
   }
 }
 
@@ -900,6 +917,49 @@ function accountIdsKey(realm: FinanceRealm): 'personalAccountIds' | 'companyAcco
   return realm === 'personal' ? 'personalAccountIds' : 'companyAccountIds'
 }
 
+function revolutSkipKeys(item: { id: string; revolutTransactionId?: string }): string[] {
+  return [item.id, item.revolutTransactionId].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0,
+  )
+}
+
+function collectLoggedRevolutIds(s: AppState): Set<string> {
+  const logged = new Set<string>(s.revolutSync.settledIds)
+  const add = (id?: string) => {
+    if (!id) return
+    logged.add(id)
+    const txnId = id.includes(':') ? id.split(':')[0] : ''
+    if (txnId) logged.add(txnId)
+  }
+  for (const spend of s.personalFinance.spends) add(spend.revolutId)
+  for (const spend of s.companyFinance.spends) add(spend.revolutId)
+  return logged
+}
+
+function withSettledIds(sync: RevolutSyncState, ids: string[]): RevolutSyncState {
+  const next = new Set(sync.settledIds)
+  for (const id of ids) {
+    if (id) next.add(id)
+  }
+  return { ...sync, settledIds: [...next] }
+}
+
+function dropSettledFromQueues(sync: RevolutSyncState): RevolutSyncState {
+  const settled = new Set(sync.settledIds)
+  const keep = (items: RevolutReviewItem[]) =>
+    items.filter(
+      (item) =>
+        !settled.has(item.id) &&
+        !settled.has(item.revolutTransactionId) &&
+        !isInternalRevolutReviewItem(item),
+    )
+  return {
+    ...sync,
+    personalQueue: keep(sync.personalQueue),
+    companyQueue: keep(sync.companyQueue),
+  }
+}
+
 function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?: boolean }): AppState {
   const seed = createSeedState()
   const today = todayDateKey()
@@ -937,6 +997,21 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
       )
     }
   }
+
+  const personalNext = stripCopiedCompanyCategories(
+    mergePersonalFoodAndDrink(personalFinance),
+    companyFinance,
+  )
+  const revolutSync = dropSettledFromQueues(
+    withSettledIds(
+      migrateRevolutSync(parsed.revolutSync, seed.revolutSync),
+      [...personalNext.spends, ...companyFinance.spends].flatMap((spend) => {
+        if (!spend.revolutId) return []
+        const txnId = spend.revolutId.includes(':') ? spend.revolutId.split(':')[0] : ''
+        return txnId ? [spend.revolutId, txnId] : [spend.revolutId]
+      }),
+    ),
+  )
 
   return {
     ...seed,
@@ -978,9 +1053,9 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           : seed.lastSaturdayDumpSunday ?? null,
     autopilotCompletions: migrateAutopilotCompletions(parsed.autopilotCompletions),
     habits: migrateHabits(parsed.habits ?? seed.habits, today),
-    personalFinance: mergePersonalFoodAndDrink(personalFinance),
+    personalFinance: personalNext,
     companyFinance,
-    revolutSync: migrateRevolutSync(parsed.revolutSync, seed.revolutSync),
+    revolutSync,
     revolutCredentials: parsed.revolutCredentials,
     visionGoals: Array.isArray(parsed.visionGoals)
       ? (parsed.visionGoals as VisionGoal[])
@@ -2607,24 +2682,22 @@ export function useStore() {
     (realm: FinanceRealm, items: RevolutReviewItem[]) => {
       const qKey = queueKey(realm)
       update((s) => {
-        // Only skip txns already logged as spends — discarded ones come back on re-sync
-        const logged = new Set<string>()
-        for (const spend of s.personalFinance.spends) {
-          if (spend.revolutId) logged.add(spend.revolutId)
-        }
-        for (const spend of s.companyFinance.spends) {
-          if (spend.revolutId) logged.add(spend.revolutId)
-        }
-        const existing = new Map(s.revolutSync[qKey].map((item) => [item.id, item]))
+        const skipped = collectLoggedRevolutIds(s)
+        const existing = new Map(
+          s.revolutSync[qKey]
+            .filter((item) => !isInternalRevolutReviewItem(item) && !skipped.has(item.id))
+            .map((item) => [item.id, item]),
+        )
         for (const item of items) {
-          if (logged.has(item.id)) continue
+          if (isInternalRevolutReviewItem(item)) continue
+          if (skipped.has(item.id) || skipped.has(item.revolutTransactionId)) continue
+          if (existing.has(item.id)) continue
           existing.set(item.id, item)
         }
         return {
           ...s,
           revolutSync: {
             ...s.revolutSync,
-            settledIds: [],
             [qKey]: [...existing.values()].sort((a, b) =>
               b.createdAt.localeCompare(a.createdAt),
             ),
@@ -2638,14 +2711,17 @@ export function useStore() {
   const discardRevolutReviewItem = useCallback(
     (realm: FinanceRealm, id: string) => {
       const qKey = queueKey(realm)
-      update((s) => ({
-        ...s,
-        revolutSync: {
-          ...s.revolutSync,
-          // Remove from queue only — do not permanently settle (re-sync can show again)
-          [qKey]: s.revolutSync[qKey].filter((item) => item.id !== id),
-        },
-      }))
+      update((s) => {
+        const item = s.revolutSync[qKey].find((row) => row.id === id)
+        const settle = item ? revolutSkipKeys(item) : [id]
+        return {
+          ...s,
+          revolutSync: {
+            ...withSettledIds(s.revolutSync, settle),
+            [qKey]: s.revolutSync[qKey].filter((row) => row.id !== id),
+          },
+        }
+      })
     },
     [update],
   )
@@ -2688,7 +2764,7 @@ export function useStore() {
             spends: [entry, ...s[ledger].spends],
           },
           revolutSync: {
-            ...s.revolutSync,
+            ...withSettledIds(s.revolutSync, revolutSkipKeys(item)),
             [qKey]: s.revolutSync[qKey].filter((row) => row.id !== id),
           },
         }

@@ -6,6 +6,13 @@ import {
   formatMoney,
   topLevelCategories,
 } from '../../utils/finance'
+import { isInternalRevolutReviewItem } from '../../lib/revolut/internal'
+import {
+  REVOLUT_UNEXPECTED,
+  defaultRevolutPick,
+  suggestRevolutCategory,
+  type RevolutCategoryPick,
+} from '../../utils/revolutCategorize'
 import {
   fetchRevolutAccounts,
   fetchRevolutStatus,
@@ -19,12 +26,9 @@ import {
 import { todayDateKey } from '../../utils/time'
 import { HudPanel } from '../HudPanel'
 
-const UNEXPECTED = '__unexpected__'
+const UNEXPECTED = REVOLUT_UNEXPECTED
 
-type CategoryPick = {
-  topId: string
-  childId: string
-}
+type CategoryPick = RevolutCategoryPick
 
 export function RevolutSyncPanel({
   store,
@@ -42,7 +46,7 @@ export function RevolutSyncPanel({
   const accountIdsKey = realm === 'personal' ? 'personalAccountIds' : 'companyAccountIds'
   const queueKey = realm === 'personal' ? 'personalQueue' : 'companyQueue'
   const savedIds = sync[accountIdsKey]
-  const queue = sync[queueKey]
+  const queue = sync[queueKey].filter((item) => !isInternalRevolutReviewItem(item))
   const ledger = store.financeFor(realm)
   const tops = topLevelCategories(ledger)
   const realmLabel = realm === 'personal' ? 'personal' : 'company'
@@ -221,8 +225,12 @@ export function RevolutSyncPanel({
     }
   }
 
-  const getPick = (id: string): CategoryPick =>
-    picks[id] ?? { topId: tops[0]?.id ?? UNEXPECTED, childId: '' }
+  const getPick = (id: string): CategoryPick => {
+    const item = queue.find((q) => q.id === id)
+    if (picks[id]) return picks[id]
+    if (item) return defaultRevolutPick(item, ledger)
+    return { topId: tops[0]?.id ?? UNEXPECTED, childId: '' }
+  }
 
   const setTop = (id: string, topId: string) => {
     setPicks((prev) => ({
@@ -250,21 +258,9 @@ export function RevolutSyncPanel({
     }
 
     const kids = childCategories(ledger, pick.topId)
-    if (kids.length > 0) {
-      if (!pick.childId) {
-        setError('Pick the specific bill / sub-expense.')
-        return
-      }
-      store.categorizeRevolutReviewItem(realm, itemId, {
-        kind: 'category',
-        categoryId: pick.childId,
-      })
-      return
-    }
-
     store.categorizeRevolutReviewItem(realm, itemId, {
       kind: 'category',
-      categoryId: pick.topId,
+      categoryId: pick.childId && kids.some((k) => k.id === pick.childId) ? pick.childId : pick.topId,
     })
   }
 
@@ -487,8 +483,8 @@ export function RevolutSyncPanel({
           </div>
           {queue.length === 0 ? (
             <p className="finance-empty">
-              No pending transactions. Sync a day to pull them in. Discarded ones come back on
-              re-sync; logged spends stay hidden.
+              No pending transactions. Sync a day to pull them in. Added and discarded stays gone.
+              Internal transfers are hidden.
             </p>
           ) : (
             <ul className="revolut-txn-list">
@@ -497,6 +493,7 @@ export function RevolutSyncPanel({
                 const pick = getPick(item.id)
                 const kids =
                   pick.topId !== UNEXPECTED ? childCategories(ledger, pick.topId) : []
+                const suggestion = isOut ? suggestRevolutCategory(item, ledger) : null
                 return (
                   <li key={item.id} className="revolut-txn">
                     <div className="revolut-txn-top">
@@ -541,13 +538,19 @@ export function RevolutSyncPanel({
                             onChange={(e) => setChild(item.id, e.target.value)}
                             aria-label={`Specific expense under category`}
                           >
-                            <option value="">Select specific…</option>
+                            <option value="">All {tops.find((c) => c.id === pick.topId)?.name || 'parent'}</option>
                             {kids.map((kid) => (
                               <option key={kid.id} value={kid.id}>
                                 {kid.name}
                               </option>
                             ))}
                           </select>
+                        )}
+
+                        {suggestion && (
+                          <span className={`revolut-suggest ${suggestion.confidence}`}>
+                            {suggestion.reason}
+                          </span>
                         )}
 
                         <button

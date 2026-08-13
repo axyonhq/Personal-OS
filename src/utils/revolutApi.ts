@@ -26,6 +26,7 @@ export interface RevolutTxnDto {
   description: string
   reference?: string
   cardLastFour?: string
+  internal?: boolean
 }
 
 const SECRET_STORAGE_KEY = 'batcave-revolut-app-secret'
