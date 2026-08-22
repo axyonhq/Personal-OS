@@ -1,57 +1,25 @@
 'use client'
 
 import { UserButton } from '@clerk/nextjs'
+import { Command, Cloud, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { AutopilotView } from './components/AutopilotView'
 import { CalendarView } from './components/CalendarView'
+import { CommandPalette } from './components/CommandPalette'
 import { DashboardView } from './components/DashboardView'
 import { DeepWorkTimerHost } from './components/DeepWorkTimerHost'
 import { FinancesView } from './components/FinancesView'
 import { MentorView } from './components/MentorView'
+import { MoreIcon, MORE_TABS, NAV_ITEMS, PRIMARY_TABS, navItem } from './components/nav'
 import { SyncStatus } from './components/SyncStatus'
 import { TasksView } from './components/TasksView'
 import { VisionView } from './components/VisionView'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
+import { IconButton } from './components/ui/Button'
 import { ModalPortal } from './components/ui/ModalPortal'
 import { useStore } from './hooks/useStore'
-import type { AppTab, DeepWorkId, ProjectId } from './types'
-import { formatLongDate, formatMinutes, todayDateKey } from './utils/time'
-
-const PERSONAL_TABS: {
-  id: AppTab
-  label: string
-  shortLabel: string
-  mark: string
-  sub: string
-  enabled?: boolean
-}[] = [
-  { id: 'dashboard', label: 'Dashboard', shortLabel: 'Home', mark: 'H', sub: 'Command Center' },
-  { id: 'vision', label: 'Vision', shortLabel: 'Vision', mark: 'V', sub: 'Horizon' },
-  { id: 'autopilot', label: 'Autopilot', shortLabel: 'Auto', mark: 'A', sub: 'Set paths' },
-  { id: 'calendar', label: 'Calendar', shortLabel: 'Cal', mark: 'C', sub: 'Schedule' },
-  { id: 'tasks', label: 'Tasks', shortLabel: 'Tasks', mark: 'T', sub: 'Projects' },
-  {
-    id: 'personalFinances',
-    label: 'Money',
-    shortLabel: 'Money',
-    mark: '$',
-    sub: 'Personal Finances',
-  },
-  { id: 'mentor', label: 'Mentor', shortLabel: 'Mentor', mark: 'M', sub: 'Synthesis' },
-]
-
-/** Phone bottom bar — everything else lives in More. */
-const PERSONAL_PRIMARY: AppTab[] = ['dashboard', 'tasks', 'autopilot', 'mentor']
-const PERSONAL_MORE: AppTab[] = ['vision', 'calendar', 'personalFinances']
-
-function NavGlyph({ kind, mark }: { kind: string; mark: string }) {
-  return (
-    <span className={`nav-glyph nav-glyph-${kind}`} aria-hidden="true">
-      <span className="nav-glyph-core" />
-      <span className="nav-glyph-mark">{mark}</span>
-    </span>
-  )
-}
+import type { DeepWorkId, ProjectId } from './types'
+import { formatLongDate, todayDateKey } from './utils/time'
 
 export default function App() {
   const store = useStore()
@@ -60,6 +28,7 @@ export default function App() {
   const [pendingFocusNote, setPendingFocusNote] = useState('')
   const [resetOpen, setResetOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
     if (!moreOpen) return
@@ -76,12 +45,8 @@ export default function App() {
   }, [moreOpen])
 
   const tab = store.state.activeTab
-  const activePersonal = PERSONAL_TABS.find((t) => t.id === tab) ?? PERSONAL_TABS[0]
-  const personalMoreActive = PERSONAL_MORE.includes(tab)
-
-  const deepToday = store.deepWorkMinutesForDate(store.state.selectedDate)
-  const targetHit = store.hitTarget(store.state.selectedDate)
-  const allTime = store.minutesFor('all', 'total')
+  const active = navItem(tab)
+  const moreActive = MORE_TABS.includes(tab)
 
   const clearPendingSession = useCallback(() => {
     setPendingSession(null)
@@ -89,18 +54,16 @@ export default function App() {
     setPendingFocusNote('')
   }, [])
 
-  const openTasks = () => {
-    store.setActiveTab('tasks')
-    store.setSelectedDate(todayDateKey())
-  }
-
-  const startSession = (projectId: DeepWorkId | ProjectId) => {
-    store.setSelectedDate(todayDateKey())
-    openTasks()
-    setPendingSessionMinimized(false)
-    setPendingFocusNote('')
-    setPendingSession(projectId)
-  }
+  const startSession = useCallback(
+    (projectId: DeepWorkId | ProjectId) => {
+      store.setSelectedDate(todayDateKey())
+      store.setActiveTab('tasks')
+      setPendingSessionMinimized(false)
+      setPendingFocusNote('')
+      setPendingSession(projectId)
+    },
+    [store],
+  )
 
   const startPersonalMinimized = (focusNote: string) => {
     setPendingSessionMinimized(true)
@@ -109,11 +72,8 @@ export default function App() {
   }
 
   const browseKey = `per:${tab}`
-  const pageTitle = activePersonal.label
-  const pageSub = activePersonal.sub
-
-  const personalPrimaryTabs = PERSONAL_TABS.filter((t) => PERSONAL_PRIMARY.includes(t.id))
-  const personalMoreTabs = PERSONAL_TABS.filter((t) => PERSONAL_MORE.includes(t.id))
+  const primaryTabs = NAV_ITEMS.filter((t) => PRIMARY_TABS.includes(t.id))
+  const moreTabs = NAV_ITEMS.filter((t) => MORE_TABS.includes(t.id))
 
   return (
     <div className="app-shell app-shell-rail layer-personal">
@@ -129,63 +89,66 @@ export default function App() {
         </div>
 
         {/* Desktop: full vertical list */}
-        <nav
-          className="rail-nav rail-nav-desktop"
-          role="tablist"
-          aria-label="Command Center sections"
-        >
-          {PERSONAL_TABS.map((t) => {
-            const enabled = t.enabled !== false
+        <nav className="rail-nav rail-nav-desktop" role="tablist" aria-label="Sections">
+          {NAV_ITEMS.map((t) => {
+            const Icon = t.icon
             return (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={tab === t.id}
-                className={`rail-item${tab === t.id ? ' active' : ''}${enabled ? '' : ' disabled'}`}
-                disabled={!enabled}
-                onClick={() => {
-                  if (enabled) store.setActiveTab(t.id)
-                }}
+                className={`rail-item${tab === t.id ? ' active' : ''}`}
+                onClick={() => store.setActiveTab(t.id)}
               >
-                <NavGlyph kind={t.id} mark={t.mark} />
+                <span className="rail-icon" aria-hidden="true">
+                  <Icon strokeWidth={1.75} />
+                </span>
                 <span className="rail-item-label">{t.label}</span>
-                {!enabled && <span className="tab-soon">Soon</span>}
               </button>
             )
           })}
         </nav>
 
+        <button type="button" className="rail-palette-hint" onClick={() => setPaletteOpen(true)}>
+          <Command aria-hidden="true" />
+          <span>Quick actions</span>
+          <kbd>⌘K</kbd>
+        </button>
+
         {/* Phone: 4 primary + More */}
-        <nav
-          className="rail-nav rail-nav-mobile"
-          role="tablist"
-          aria-label="Command Center sections"
-        >
-          {personalPrimaryTabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`rail-item${tab === t.id ? ' active' : ''}`}
-              onClick={() => {
-                setMoreOpen(false)
-                store.setActiveTab(t.id)
-              }}
-            >
-              <NavGlyph kind={t.id} mark={t.mark} />
-              <span className="rail-item-label">{t.shortLabel}</span>
-            </button>
-          ))}
+        <nav className="rail-nav rail-nav-mobile" role="tablist" aria-label="Sections">
+          {primaryTabs.map((t) => {
+            const Icon = t.icon
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`rail-item${tab === t.id ? ' active' : ''}`}
+                onClick={() => {
+                  setMoreOpen(false)
+                  store.setActiveTab(t.id)
+                }}
+              >
+                <span className="rail-icon" aria-hidden="true">
+                  <Icon strokeWidth={1.75} />
+                </span>
+                <span className="rail-item-label">{t.shortLabel}</span>
+              </button>
+            )
+          })}
           <button
             type="button"
-            className={`rail-item rail-item-more${moreOpen || personalMoreActive ? ' active' : ''}`}
+            className={`rail-item rail-item-more${moreOpen || moreActive ? ' active' : ''}`}
             aria-expanded={moreOpen}
             aria-controls="mobile-more-sheet"
             onClick={() => setMoreOpen((v) => !v)}
           >
-            <NavGlyph kind="more" mark="+" />
+            <span className="rail-icon" aria-hidden="true">
+              <MoreIcon strokeWidth={1.75} />
+            </span>
             <span className="rail-item-label">More</span>
           </button>
         </nav>
@@ -194,50 +157,38 @@ export default function App() {
       <div className="app-stage">
         <header className="command-bar">
           <div className="brand-lockup stage-title">
-            <span className="brand-name">{pageTitle}</span>
-            <span className="brand-sub desktop-only">{pageSub}</span>
+            <span className="brand-name">{active.label}</span>
+            <span className="brand-sub desktop-only">{active.sub}</span>
           </div>
           <div className="status-pills">
-            <span className="status-pill status-pill-date">{formatLongDate(store.state.selectedDate)}</span>
-            {(tab === 'calendar' || tab === 'tasks') && (
-              <>
-                <span className={`status-pill desktop-only ${targetHit ? 'hit' : 'miss'}`}>
-                  DEEP <strong>{formatMinutes(deepToday)}</strong>
-                  <span style={{ opacity: 0.7 }}>
-                    {' '}
-                    / {formatMinutes(store.state.dailyDeepWorkTargetMinutes)}
-                  </span>
-                </span>
-                <span className="status-pill desktop-only">
-                  STREAK <strong>{store.targetStreak}</strong>
-                </span>
-                <span className="status-pill desktop-only">
-                  TOTAL <strong>{formatMinutes(allTime)}</strong>
-                </span>
-                {store.state.activeTimer && (
-                  <span className={`status-pill desktop-only${store.isTimerPaused ? ' paused' : ' live'}`}>
-                    {store.isTimerPaused ? '⏸ PAUSED' : '● LIVE'}
-                  </span>
-                )}
-              </>
-            )}
-            <button
-              className="ghost-btn desktop-only"
-              type="button"
-              title="Resets deep-work data only — finances are kept"
+            <span className="status-pill status-pill-date">
+              {formatLongDate(store.state.selectedDate)}
+            </span>
+            <IconButton
+              label="Quick actions (⌘K)"
+              size="sm"
+              className="desktop-only"
+              onClick={() => setPaletteOpen(true)}
+            >
+              <Command />
+            </IconButton>
+            <IconButton
+              label="Upload everything in this browser to the cloud"
+              size="sm"
+              className="desktop-only"
+              disabled={store.cloudSync === 'loading'}
+              onClick={() => void store.pushBrowserToCloud()}
+            >
+              <Cloud />
+            </IconButton>
+            <IconButton
+              label="Reset deep-work data (finances are kept)"
+              size="sm"
+              className="desktop-only"
               onClick={() => setResetOpen(true)}
             >
-              Reset work
-            </button>
-            <button
-              className="ghost-btn desktop-only"
-              type="button"
-              title="Force-upload everything in this browser to Supabase under your account"
-              onClick={() => void store.pushBrowserToCloud()}
-              disabled={store.cloudSync === 'loading'}
-            >
-              Upload → cloud
-            </button>
+              <RotateCcw />
+            </IconButton>
             <SyncStatus store={store} />
             <UserButton />
           </div>
@@ -269,35 +220,42 @@ export default function App() {
               <div className="mobile-more-handle" aria-hidden="true" />
               <p className="mobile-more-title">More</p>
               <div className="mobile-more-list">
-                {personalMoreTabs.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={`mobile-more-item${tab === t.id ? ' active' : ''}`}
-                    onClick={() => {
-                      store.setActiveTab(t.id)
-                      setMoreOpen(false)
-                    }}
-                  >
-                    <NavGlyph kind={t.id} mark={t.mark} />
-                    <span>
-                      <strong>{t.label}</strong>
-                      <em>{t.sub}</em>
-                    </span>
-                  </button>
-                ))}
+                {moreTabs.map((t) => {
+                  const Icon = t.icon
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`mobile-more-item${tab === t.id ? ' active' : ''}`}
+                      onClick={() => {
+                        store.setActiveTab(t.id)
+                        setMoreOpen(false)
+                      }}
+                    >
+                      <span className="rail-icon" aria-hidden="true">
+                        <Icon strokeWidth={1.75} />
+                      </span>
+                      <span>
+                        <strong>{t.label}</strong>
+                        <em>{t.sub}</em>
+                      </span>
+                    </button>
+                  )
+                })}
                 <button
                   type="button"
                   className="mobile-more-item"
                   onClick={() => {
                     setMoreOpen(false)
-                    setResetOpen(true)
+                    setPaletteOpen(true)
                   }}
                 >
-                  <NavGlyph kind="reset" mark="R" />
+                  <span className="rail-icon" aria-hidden="true">
+                    <Command strokeWidth={1.75} />
+                  </span>
                   <span>
-                    <strong>Reset work</strong>
-                    <em>Deep-work data only</em>
+                    <strong>Quick actions</strong>
+                    <em>Search and jump anywhere</em>
                   </span>
                 </button>
                 <button
@@ -309,16 +267,34 @@ export default function App() {
                     setMoreOpen(false)
                   }}
                 >
-                  <NavGlyph kind="cloud" mark="↑" />
+                  <span className="rail-icon" aria-hidden="true">
+                    <Cloud strokeWidth={1.75} />
+                  </span>
                   <span>
-                    <strong>Upload → cloud</strong>
+                    <strong>Upload to cloud</strong>
                     <em>
                       {store.cloudSync === 'ready'
                         ? 'Synced'
                         : store.cloudSync === 'error'
                           ? store.cloudError || 'Sync error'
-                          : 'Force push to Supabase'}
+                          : 'Force push this browser'}
                     </em>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="mobile-more-item"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    setResetOpen(true)
+                  }}
+                >
+                  <span className="rail-icon" aria-hidden="true">
+                    <RotateCcw strokeWidth={1.75} />
+                  </span>
+                  <span>
+                    <strong>Reset work</strong>
+                    <em>Deep-work data only</em>
                   </span>
                 </button>
               </div>
@@ -326,6 +302,13 @@ export default function App() {
           </div>
         </ModalPortal>
       )}
+
+      <CommandPalette
+        store={store}
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onStartSession={startSession}
+      />
 
       <DeepWorkTimerHost
         store={store}
@@ -339,7 +322,7 @@ export default function App() {
       <ConfirmDialog
         open={resetOpen}
         title="Reset deep work"
-        message="Reset deep-work data (tasks, timers, habits)? Finances are kept."
+        message="Reset deep-work data (tasks, timers, habits)? Finances and vision are kept."
         confirmLabel="Reset work"
         danger
         onCancel={() => setResetOpen(false)}
