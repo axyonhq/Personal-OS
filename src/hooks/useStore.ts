@@ -1424,9 +1424,23 @@ export function useStore() {
     }))
   }, [update])
 
-  const removeLoop = useCallback((id: string) => {
-    update((s) => ({ ...s, openLoops: s.openLoops.filter((l) => l.id !== id) }))
-  }, [update])
+  const removeLoop = useCallback(
+    (id: string): (() => void) => {
+      const index = stateRef.current.openLoops.findIndex((l) => l.id === id)
+      const removed = index === -1 ? null : stateRef.current.openLoops[index]
+      update((s) => ({ ...s, openLoops: s.openLoops.filter((l) => l.id !== id) }))
+      return () => {
+        if (!removed) return
+        update((s) => {
+          if (s.openLoops.some((l) => l.id === removed.id)) return s
+          const next = [...s.openLoops]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, openLoops: next }
+        })
+      }
+    },
+    [update],
+  )
 
   const addReminder = useCallback((text: string) => {
     const trimmed = text.trim()
@@ -1470,9 +1484,23 @@ export function useStore() {
     }))
   }, [update])
 
-  const removeHabit = useCallback((id: string) => {
-    update((s) => ({ ...s, habits: s.habits.filter((h) => h.id !== id) }))
-  }, [update])
+  const removeHabit = useCallback(
+    (id: string): (() => void) => {
+      const index = stateRef.current.habits.findIndex((h) => h.id === id)
+      const removed = index === -1 ? null : stateRef.current.habits[index]
+      update((s) => ({ ...s, habits: s.habits.filter((h) => h.id !== id) }))
+      return () => {
+        if (!removed) return
+        update((s) => {
+          if (s.habits.some((h) => h.id === removed.id)) return s
+          const next = [...s.habits]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, habits: next }
+        })
+      }
+    },
+    [update],
+  )
 
   const toggleTask = useCallback((projectId: ProjectId, taskId: string) => {
     update((s) => ({
@@ -1639,15 +1667,39 @@ export function useStore() {
     [update],
   )
 
-  const removeTask = useCallback((projectId: ProjectId, taskId: string) => {
-    update((s) => ({
-      ...s,
-      tasks: {
-        ...s.tasks,
-        [projectId]: s.tasks[projectId].filter((t) => t.id !== taskId),
-      },
-    }))
-  }, [update])
+  /**
+   * Removes a task and hands back a function that puts it back where it was.
+   *
+   * Returning the undo from the store keeps the snapshot next to the data, so
+   * callers can offer "Undo" without reimplementing restore logic.
+   */
+  const removeTask = useCallback(
+    (projectId: ProjectId, taskId: string): (() => void) => {
+      const list = stateRef.current.tasks[projectId] || []
+      const index = list.findIndex((t) => t.id === taskId)
+      const removed = index === -1 ? null : list[index]
+
+      update((s) => ({
+        ...s,
+        tasks: {
+          ...s.tasks,
+          [projectId]: s.tasks[projectId].filter((t) => t.id !== taskId),
+        },
+      }))
+
+      return () => {
+        if (!removed) return
+        update((s) => {
+          const current = s.tasks[projectId] || []
+          if (current.some((t) => t.id === removed.id)) return s
+          const next = [...current]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, tasks: { ...s.tasks, [projectId]: next } }
+        })
+      }
+    },
+    [update],
+  )
 
   const setSummaryMode = useCallback((summaryMode: SummaryMode) => update({ summaryMode }), [update])
   const setCalendarMonth = useCallback((calendarMonth: string) => update({ calendarMonth }), [update])

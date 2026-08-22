@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Project, Task } from '../types'
 import type { Store } from '../hooks/useStore'
+import { useToast } from './ui/Toast'
 import { addDays, todayDateKey } from '../utils/time'
 
 function plannedLabel(plannedDate: string | null | undefined, today: string): string {
@@ -24,6 +25,7 @@ export function TaskRow({
   /** Quick date chips: Today / Tomorrow / Clear */
   showDateAssign?: boolean
 }) {
+  const { toastUndo } = useToast()
   const today = todayDateKey()
   const tomorrow = addDays(today, 1)
   const planned = task.plannedDate ?? null
@@ -120,7 +122,11 @@ export function TaskRow({
         <button
           type="button"
           className="x-btn"
-          onClick={() => store.removeTask(project.id, task.id)}
+          aria-label={`Delete task: ${task.text}`}
+          onClick={() => {
+            const undo = store.removeTask(project.id, task.id)
+            toastUndo('Task deleted', undo, task.text)
+          }}
         >
           ×
         </button>
