@@ -109,8 +109,3 @@ export function BodyEnergyLog({
     </div>
   )
 }
-
-export function isBodyLogReady(store: Store, date: string): boolean {
-  const log = store.state.bodyLogs?.[date]
-  return Boolean(log && log.energy != null && log.sleepHours != null)
-}

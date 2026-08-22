@@ -98,6 +98,15 @@ import { repairJournalEntryDate } from '../utils/journalDate'
 const STORAGE_KEY = 'batcave-deep-work-os-v2'
 const FINANCE_BACKUP_KEY = 'batcave-finance-backup-v1'
 
+/**
+ * Caps on the fields that otherwise grow forever. The whole app state is one
+ * JSON blob in localStorage (~5MB ceiling), so unbounded arrays eventually stop
+ * every save. These two are bookkeeping and raw OCR text, not user history, so
+ * trimming them is safe.
+ */
+const MAX_SETTLED_IDS = 2000
+const MAX_JOURNAL_TEXT_CHARS = 20_000
+
 /** Active work ms for a timer — excludes pause time. */
 function activeTimerWorkMs(t: ActiveTimer, now = Date.now()): number {
   if (t.pausedAt) return t.elapsedBefore
@@ -217,7 +226,10 @@ function migrateMentorState(raw: unknown): MentorState {
               typeof j.sourceName === 'string' && j.sourceName.trim()
                 ? j.sourceName.trim()
                 : 'Journal page',
-            extractedText: typeof j.extractedText === 'string' ? j.extractedText : '',
+            extractedText:
+              typeof j.extractedText === 'string'
+                ? j.extractedText.slice(0, MAX_JOURNAL_TEXT_CHARS)
+                : '',
             status,
             createdAt:
               typeof j.createdAt === 'string' ? j.createdAt : new Date().toISOString(),
@@ -624,13 +636,15 @@ function migrateRevolutSync(
   fallback: RevolutSyncState,
 ): RevolutSyncState {
   if (!raw || typeof raw !== 'object') return fallback
+  // Newest-last dedupe, then keep only the tail. This list is pure bookkeeping
+  // to avoid re-importing transactions, and grew without bound before.
   const settledIds = [
     ...new Set(
       (Array.isArray(raw.settledIds) ? raw.settledIds : []).filter(
         (id): id is string => typeof id === 'string' && id.length > 0,
       ),
     ),
-  ]
+  ].slice(-MAX_SETTLED_IDS)
   const settled = new Set(settledIds)
   const keepQueue = (items: RevolutReviewItem[] | undefined) =>
     (Array.isArray(items) ? items : []).filter(
@@ -894,6 +908,8 @@ export function useStore() {
   const [cloudSync, setCloudSync] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [cloudSource, setCloudSource] = useState<'local' | 'remote' | null>(null)
+  /** True when localStorage rejected a write, so offline copies have stopped. */
+  const [storageFull, setStorageFull] = useState(false)
   const skipNextCloudSave = useRef(false)
   const saveTimer = useRef<number | null>(null)
   /** Coalesce overlapping cloud upserts so an older in-flight write cannot land last. */
@@ -914,8 +930,11 @@ export function useStore() {
     if (!hydrateSettled.current) return
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      setStorageFull(false)
     } catch {
-      // Quota exceeded — the cloud row remains the source of truth.
+      // Out of quota. The cloud row is still the source of truth, but the user
+      // needs to know this browser has stopped keeping an offline copy.
+      setStorageFull(true)
     }
     writeFinanceBackup(state.personalFinance)
   }, [state])
@@ -1928,36 +1947,47 @@ export function useStore() {
       const openKeys = new Set(
         charges.filter((c) => c.status === 'open').map((c) => mentorChargeKey(c.kind, c.text)),
       )
+      // Replace entries rather than mutating them: these objects are still
+      // referenced by the previous state, and React 19 may reuse that snapshot.
       const upsert = (kind: MentorChargeKind, text: string, actioned: boolean) => {
         const key = mentorChargeKey(kind, text)
-        const existingOpen = charges.find(
+        const openIndex = charges.findIndex(
           (c) => c.status === 'open' && mentorChargeKey(c.kind, c.text) === key,
         )
-        if (existingOpen) {
-          existingOpen.sourceInsightId = next.id
-          existingOpen.updatedAt = now
-          if (actioned) {
-            existingOpen.status = 'actioned'
-            existingOpen.actionedAt = now
-            existingOpen.installKind = existingOpen.installKind || 'manual'
-            openKeys.delete(key)
+        if (openIndex !== -1) {
+          const existingOpen = charges[openIndex]
+          charges[openIndex] = {
+            ...existingOpen,
+            sourceInsightId: next.id,
+            updatedAt: now,
+            ...(actioned
+              ? {
+                  status: 'actioned' as const,
+                  actionedAt: now,
+                  installKind: existingOpen.installKind || ('manual' as const),
+                }
+              : {}),
           }
+          if (actioned) openKeys.delete(key)
           return
         }
         if (openKeys.has(key)) return
         // Raised again after they cleared it — reopen. Accountability is the point.
-        const cleared = charges.find(
+        const clearedIndex = charges.findIndex(
           (c) =>
             mentorChargeKey(c.kind, c.text) === key &&
             (c.status === 'actioned' || c.status === 'dismissed'),
         )
-        if (cleared && !actioned) {
-          cleared.status = 'open'
-          cleared.sourceInsightId = next.id
-          cleared.updatedAt = now
-          cleared.actionedAt = undefined
-          cleared.actionNote = undefined
-          cleared.installKind = undefined
+        if (clearedIndex !== -1 && !actioned) {
+          charges[clearedIndex] = {
+            ...charges[clearedIndex],
+            status: 'open',
+            sourceInsightId: next.id,
+            updatedAt: now,
+            actionedAt: undefined,
+            actionNote: undefined,
+            installKind: undefined,
+          }
           openKeys.add(key)
           return
         }
@@ -2603,26 +2633,49 @@ export function useStore() {
   )
 
   const targetStreak = useMemo(() => {
+    // Re-run each second while a timer is live so today's streak stays current.
+    void tick
+    // Index once instead of rescanning every entry for each of up to 365 days.
+    const deepMinutesByDate = new Map<string, number>()
+    const datesWithEntries = new Set<string>()
+    for (const entry of state.timeEntries) {
+      datesWithEntries.add(entry.date)
+      if (!isDeepWorkId(entry.projectId)) continue
+      deepMinutesByDate.set(entry.date, (deepMinutesByDate.get(entry.date) || 0) + entry.minutes)
+    }
+
+    // Count a running timer too, so the streak agrees with hitTarget instead of
+    // reading zero until the session is saved.
+    if (state.activeTimer && isDeepWorkId(state.activeTimer.projectId)) {
+      const liveDate = todayDateKey(new Date(state.activeTimer.sessionStartedAt))
+      const liveMinutes = Math.floor(activeTimerWorkMs(state.activeTimer) / 60000)
+      if (liveMinutes > 0) {
+        datesWithEntries.add(liveDate)
+        deepMinutesByDate.set(liveDate, (deepMinutesByDate.get(liveDate) || 0) + liveMinutes)
+      }
+    }
+
     let streak = 0
     let cursor = state.selectedDate
-    if (!hitTarget(cursor)) {
+    // Today still in progress should not break a streak built up to yesterday.
+    if ((deepMinutesByDate.get(cursor) || 0) < state.dailyDeepWorkTargetMinutes) {
       cursor = addDays(cursor, -1)
     }
     for (let i = 0; i < 365; i++) {
-      const mins = state.timeEntries
-        .filter((e) => e.date === cursor && isDeepWorkId(e.projectId))
-        .reduce((s, e) => s + e.minutes, 0)
-      const hasData = state.timeEntries.some((e) => e.date === cursor)
-      if (!hasData && mins === 0) break
-      if (mins >= state.dailyDeepWorkTargetMinutes) {
-        streak += 1
-        cursor = addDays(cursor, -1)
-      } else {
-        break
-      }
+      const mins = deepMinutesByDate.get(cursor) || 0
+      if (!datesWithEntries.has(cursor) && mins === 0) break
+      if (mins < state.dailyDeepWorkTargetMinutes) break
+      streak += 1
+      cursor = addDays(cursor, -1)
     }
     return streak
-  }, [state.selectedDate, state.timeEntries, state.dailyDeepWorkTargetMinutes, hitTarget])
+  }, [
+    state.selectedDate,
+    state.timeEntries,
+    state.activeTimer,
+    state.dailyDeepWorkTargetMinutes,
+    tick,
+  ])
 
   const weekHitRate = useMemo(() => {
     const days = weekDays(state.selectedDate)
@@ -2721,6 +2774,7 @@ export function useStore() {
     cloudSync,
     cloudError,
     cloudSource,
+    storageFull,
     pushBrowserToCloud,
     projects: PROJECTS,
     liveTimerSeconds,

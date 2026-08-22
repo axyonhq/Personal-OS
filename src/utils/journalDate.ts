@@ -1,4 +1,4 @@
-import { pad2, todayDateKey, zonedParts } from './time'
+import { pad2, zonedParts } from './time'
 
 const MONTHS: Record<string, number> = {
   january: 1,
@@ -90,7 +90,7 @@ export function parseFlexibleJournalDate(
     return coerceJournalDateYear(parsed, text, now)
   }
 
-  const numeric = text.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](20\d{2})\b/)
+  const numeric = text.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](20\d{2})\b/)
   if (numeric) {
     const a = Number(numeric[1])
     const b = Number(numeric[2])
@@ -134,7 +134,7 @@ export function extractDateFromJournalText(text: string, now: Date = new Date())
 } {
   if (!text.trim()) return { date: null, raw: null }
 
-  const pageDate = text.match(/page\s*date\s*[:\-]\s*(.+)/i)
+  const pageDate = text.match(/page\s*date\s*[:-]\s*(.+)/i)
   if (pageDate) {
     const raw = pageDate[1].split('\n')[0].trim()
     const date = parseFlexibleJournalDate(raw, now)

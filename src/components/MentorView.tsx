@@ -35,7 +35,8 @@ export function MentorView({ store }: { store: Store }) {
     [store.state.timeEntries],
   )
   const journalReady = mentor.journalEntries.filter((j) => j.status === 'extracted').length
-  const charges = mentor.charges || []
+  // Memoized so the derived lists below do not recompute on every render.
+  const charges = useMemo(() => mentor.charges || [], [mentor.charges])
   const openCharges = useMemo(
     () => charges.filter((c) => c.status === 'open'),
     [charges],

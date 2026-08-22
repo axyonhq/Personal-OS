@@ -10,7 +10,8 @@ import { BodyEnergyLog } from './BodyEnergyLog'
 import { DailyNotes } from './DailyNotes'
 import { IdentityPanel } from './IdentityPanel'
 import { MentalRam } from './MentalRam'
-import { MissDayRepair, needsMissDayRepair } from './MissDayRepair'
+import { MissDayRepair } from './MissDayRepair'
+import { needsMissDayRepair } from '../utils/dayChecks'
 import { NonNegotiables } from './NonNegotiables'
 import { PauseAnalytics, SessionAnalytics } from './SessionAnalytics'
 import { TimeSummary } from './TimeSummary'
@@ -61,7 +62,7 @@ export function DashboardView({
   const [commandModal, setCommandModal] = useState<CommandModal>(null)
   const [repairOpen, setRepairOpen] = useState(false)
   const activeRitual = RITUAL_CARDS.find((card) => card.id === ritualOpen)
-  const repairNeeded = useMemo(() => needsMissDayRepair(store), [store.state])
+  const repairNeeded = useMemo(() => needsMissDayRepair(store.state), [store.state])
   const eveningLocked = isAutopilotLocked(store.state, 'evening')
 
   return (

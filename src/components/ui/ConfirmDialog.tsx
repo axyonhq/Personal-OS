@@ -34,7 +34,12 @@ export function ConfirmDialog({
       size="sm"
       footer={
         <div className="btn-row platform-confirm-actions">
-          <button type="button" className="btn-secondary" onClick={onCancel}>
+          {/*
+            Cancel takes focus, never the destructive action. Previously the
+            confirm button was autofocused, so opening a "Reset work" dialog and
+            pressing Enter wiped data with no further input.
+          */}
+          <button type="button" className="btn-secondary" onClick={onCancel} autoFocus>
             {cancelLabel}
           </button>
           {altLabel && onAlt && (
@@ -46,7 +51,6 @@ export function ConfirmDialog({
             type="button"
             className={danger ? 'btn-primary danger' : 'btn-primary'}
             onClick={onConfirm}
-            autoFocus={!altLabel}
           >
             {confirmLabel}
           </button>

@@ -9,7 +9,19 @@ import type { Store } from '../hooks/useStore'
  * data had stopped reaching the cloud.
  */
 export function SyncStatus({ store }: { store: Store }) {
-  const { cloudSync, cloudError } = store
+  const { cloudSync, cloudError, storageFull } = store
+
+  if (storageFull) {
+    return (
+      <div className="sync-status sync-status-error" role="alert">
+        <span className="sync-status-dot" aria-hidden="true" />
+        <span className="sync-status-text">
+          <strong>This browser is out of space</strong>
+          <em>Cloud still saving. Offline copy paused.</em>
+        </span>
+      </div>
+    )
+  }
 
   if (cloudSync === 'idle') return null
 

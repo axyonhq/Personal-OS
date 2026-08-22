@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { PROJECTS } from '../../data/seed'
 import type { Store } from '../../hooks/useStore'
 import { addDays, formatLongDate, todayDateKey } from '../../utils/time'
-import { BodyEnergyLog, isBodyLogReady } from '../BodyEnergyLog'
+import { BodyEnergyLog } from '../BodyEnergyLog'
+import { isBodyLogReady } from '../../utils/dayChecks'
 import { CashTrackerPanel } from '../finance/CashTrackerPanel'
 import { JournalCapture } from '../JournalCapture'
 import { RevolutSyncPanel } from '../finance/RevolutSyncPanel'
@@ -84,7 +85,7 @@ export function EveningWindDown({
     setFinished(false)
   }, [open])
 
-  const bodyReady = isBodyLogReady(store, today)
+  const bodyReady = isBodyLogReady(store.state, today)
   const journalDone = journalExtracted > 0
 
   const openTasks = useMemo(() => {
