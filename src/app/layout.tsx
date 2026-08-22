@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
 import { JetBrains_Mono, Manrope, Space_Grotesk } from 'next/font/google'
+import { Providers } from '../components/Providers'
 import './globals.css'
 
 const manrope = Manrope({
@@ -24,6 +25,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Command Center — Personal OS',
   description: 'Personal command center OS',
+  manifest: '/manifest.webmanifest',
   icons: {
     icon: '/favicon.svg',
   },
@@ -52,7 +54,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${manrope.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}
     >
       <body className={manrope.className}>
-        <ClerkProvider>{children}</ClerkProvider>
+        <ClerkProvider>
+          <Providers>{children}</Providers>
+        </ClerkProvider>
       </body>
     </html>
   )

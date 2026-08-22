@@ -4,18 +4,23 @@ import {
   ArrowRight,
   CheckCircle2,
   CornerDownLeft,
+  Download,
   ListTodo,
   Play,
   Search,
+  Upload,
   Wallet,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { PROJECT_MAP, PROJECTS } from '../data/seed'
+import { useNavigateTab } from '../hooks/useNavigateTab'
 import type { Store } from '../hooks/useStore'
 import { DEEP_WORK_IDS, type AppTab, type DeepWorkId, type ProjectId } from '../types'
+import { triggerBackupDownload } from '../utils/backup'
 import { formatMoney } from '../utils/finance'
 import { NAV_ITEMS } from './nav'
+import { useToast } from './ui/Toast'
 
 type Command = {
   id: string
@@ -50,6 +55,9 @@ export function CommandPalette({
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const importRef = useRef<HTMLInputElement>(null)
+  const navigateTab = useNavigateTab()
+  const { toast } = useToast()
 
   // Global shortcut. Cmd+K on macOS, Ctrl+K elsewhere.
   useEffect(() => {
@@ -91,7 +99,7 @@ export function CommandPalette({
         keywords: item.id,
         icon: <Icon strokeWidth={1.75} />,
         run: () => {
-          store.setActiveTab(item.id as AppTab)
+          navigateTab(item.id as AppTab)
           close()
         },
       })
@@ -141,14 +149,38 @@ export function CommandPalette({
         keywords: 'spend expense budget money log',
         icon: <Wallet strokeWidth={1.75} />,
         run: () => {
-          store.setActiveTab('personalFinances')
+          navigateTab('personalFinances')
           close()
         },
       })
     }
 
+    list.push({
+      id: 'backup:export',
+      label: 'Export backup',
+      hint: 'JSON file, no bank secrets',
+      group: 'Data',
+      keywords: 'download backup export json',
+      icon: <Download strokeWidth={1.75} />,
+      run: () => {
+        triggerBackupDownload(store.exportBackup())
+        close()
+      },
+    })
+    list.push({
+      id: 'backup:import',
+      label: 'Import backup',
+      hint: 'Replace this browser’s copy',
+      group: 'Data',
+      keywords: 'upload restore import json',
+      icon: <Upload strokeWidth={1.75} />,
+      run: () => {
+        importRef.current?.click()
+      },
+    })
+
     return list
-  }, [store, close, onStartSession])
+  }, [store, close, onStartSession, navigateTab])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -278,6 +310,31 @@ export function CommandPalette({
             <kbd>↓</kbd> move <kbd>↵</kbd> run
           </span>
         </footer>
+        <input
+          ref={importRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''
+            if (!file) return
+            void file
+              .text()
+              .then((raw) => {
+                store.importBackup(raw)
+                toast({ title: 'Backup restored', tone: 'success' })
+                close()
+              })
+              .catch((err: unknown) => {
+                toast({
+                  title: 'Could not restore that file',
+                  description: err instanceof Error ? err.message : 'Unknown error',
+                  tone: 'danger',
+                })
+              })
+          }}
+        />
       </div>
     </div>,
     document.body,

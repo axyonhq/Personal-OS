@@ -514,6 +514,8 @@ export interface RevolutCredentials {
 export interface StateMigrations {
   /** Legacy `companyFinance` ledger folded into `personalFinance` (one-time). */
   companyFinanceAbsorbed?: boolean
+  /** First-run setup finished (or skipped). */
+  onboarded?: boolean
 }
 
 export interface AppState {

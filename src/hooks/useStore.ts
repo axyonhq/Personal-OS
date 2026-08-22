@@ -1,5 +1,17 @@
+'use client'
+
 import { useAuth, useSession } from '@clerk/nextjs'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { createEmptyState, createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
@@ -16,6 +28,7 @@ import {
   preferRicherState,
   withLocalRevolutCredentials,
 } from '../lib/supabase/sync'
+import { parseBackup, serializeBackup } from '../utils/backup'
 import type {
   ActiveTimer,
   AppState,
@@ -813,7 +826,7 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     ),
   )
 
-  return {
+  const normalized: AppState = {
     ...seed,
     ...(parsedClean as Partial<AppState>),
     // Always open on Bali “today” so the day label matches WITA
@@ -879,6 +892,26 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     migrations,
     legacyCompanyCategoryIds,
   }
+
+  // People who already have a workspace should not get the first-run wizard.
+  if (!migrations.onboarded && looksLivedIn(normalized)) {
+    migrations.onboarded = true
+    normalized.migrations = { ...migrations }
+  }
+
+  return normalized
+}
+
+function looksLivedIn(state: AppState): boolean {
+  if (state.identityBody.trim()) return true
+  if (state.habits.length > 0) return true
+  if (state.timeEntries.length > 0) return true
+  if (state.visionGoals.length > 0) return true
+  if (Object.values(state.tasks).some((list) => list.length > 0)) return true
+  if (state.personalFinance.spends.length > 0) return true
+  if (state.personalFinance.categories.some((c) => !c.isPreset && c.amount > 0)) return true
+  if ((state.mentor.messages || []).some((m) => m.role !== 'system')) return true
+  return false
 }
 
 function loadState(): AppState {
@@ -893,7 +926,7 @@ function loadState(): AppState {
   }
 }
 
-export function useStore() {
+export function useStoreState() {
   const { isLoaded: authLoaded, userId } = useAuth()
   const { session } = useSession()
   /**
@@ -903,11 +936,14 @@ export function useStore() {
    */
   const sessionRef = useRef(session)
   sessionRef.current = session
+  const hasSession = Boolean(session)
   const [state, setState] = useState<AppState>(() => loadState())
   const [tick, setTick] = useState(0)
   const [cloudSync, setCloudSync] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [cloudSource, setCloudSource] = useState<'local' | 'remote' | null>(null)
+  /** True once the first local/cloud merge has finished, so first-run UI can show. */
+  const [hydrateReady, setHydrateReady] = useState(false)
   /** True when localStorage rejected a write, so offline copies have stopped. */
   const [storageFull, setStorageFull] = useState(false)
   const skipNextCloudSave = useRef(false)
@@ -1012,9 +1048,10 @@ export function useStore() {
 
   // Load / seed cloud document once Clerk + Supabase are ready
   useEffect(() => {
-    if (!authLoaded || !userId || !sessionRef.current) return
+    if (!authLoaded || !userId || !hasSession) return
     if (!isSupabaseConfigured()) {
       hydrateSettled.current = true
+      setHydrateReady(true)
       setCloudSync('idle')
       return
     }
@@ -1033,11 +1070,14 @@ export function useStore() {
         if (!activeSession) {
           hydrateSettled.current = true
           hydratedForUser.current = null
+          setHydrateReady(true)
+          setCloudSync('idle')
           return
         }
         const client = createClerkSupabaseClient(() => activeSession.getToken())
         if (!client) {
           hydrateSettled.current = true
+          setHydrateReady(true)
           setCloudSync('idle')
           return
         }
@@ -1058,6 +1098,7 @@ export function useStore() {
         if (error) {
           hydrateSettled.current = true
           hydratedForUser.current = null
+          setHydrateReady(true)
           setCloudError(error.message)
           setCloudSync('error')
           return
@@ -1121,6 +1162,7 @@ export function useStore() {
         skipNextCloudSave.current = true
         stateRef.current = saved
         hydrateSettled.current = true
+        setHydrateReady(true)
         setState(saved)
         setCloudSource(source)
         setCloudSync('ready')
@@ -1133,6 +1175,7 @@ export function useStore() {
         // stop this browser from saving anything at all.
         hydrateSettled.current = true
         hydratedForUser.current = null
+        setHydrateReady(true)
         setCloudError(err instanceof Error ? err.message : 'Cloud sync failed')
         setCloudSync('error')
       }
@@ -1141,14 +1184,17 @@ export function useStore() {
     return () => {
       cancelled = true
     }
-  }, [authLoaded, userId, upsertCloudState, enqueueCloudSave])
+  }, [authLoaded, userId, hasSession, upsertCloudState, enqueueCloudSave])
 
   // Signed-out or Supabase-less sessions never hydrate, so open the local
   // persistence gate for them once auth has resolved.
   useEffect(() => {
     if (hydrateSettled.current) return
     if (!authLoaded) return
-    if (!userId || !isSupabaseConfigured()) hydrateSettled.current = true
+    if (!userId || !isSupabaseConfigured()) {
+      hydrateSettled.current = true
+      setHydrateReady(true)
+    }
   }, [authLoaded, userId])
 
   // Debounced cloud save after hydration
@@ -2601,7 +2647,7 @@ export function useStore() {
         personalFinance: s.personalFinance,
         revolutSync: s.revolutSync,
         revolutCredentials: s.revolutCredentials,
-        migrations: s.migrations,
+        migrations: { ...s.migrations, onboarded: true },
         legacyCompanyCategoryIds: s.legacyCompanyCategoryIds,
       }
       stateRef.current = next
@@ -2609,6 +2655,42 @@ export function useStore() {
       return next
     })
   }, [])
+
+  const exportBackup = useCallback(() => serializeBackup(stateRef.current), [])
+
+  const importBackup = useCallback((raw: string) => {
+    const parsed = parseBackup(raw)
+    const next = normalizeAppState(parsed, { recoverLocal: false })
+    next.revolutCredentials = stateRef.current.revolutCredentials
+    next.migrations = { ...next.migrations, onboarded: true }
+    hydrateSettled.current = true
+    stateRef.current = next
+    setState(next)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      setStorageFull(true)
+    }
+    writeFinanceBackup(next.personalFinance)
+  }, [])
+
+  const completeOnboarding = useCallback(
+    (patch: Partial<Pick<AppState, 'identityBody' | 'identityQuestion' | 'dailyDeepWorkTargetMinutes'>>) => {
+      update((s) => ({
+        ...s,
+        ...patch,
+        migrations: { ...s.migrations, onboarded: true },
+      }))
+    },
+    [update],
+  )
+
+  const skipOnboarding = useCallback(() => {
+    update((s) => ({
+      ...s,
+      migrations: { ...s.migrations, onboarded: true },
+    }))
+  }, [update])
 
   const addVisionGoal = useCallback(
     (input: { title: string; body: string }) => {
@@ -2840,6 +2922,7 @@ export function useStore() {
     cloudSync,
     cloudError,
     cloudSource,
+    hydrateReady,
     storageFull,
     pushBrowserToCloud,
     projects: PROJECTS,
@@ -2935,9 +3018,35 @@ export function useStore() {
     minutesFor,
     resetToSeed,
     loadSampleData,
+    exportBackup,
+    importBackup,
+    completeOnboarding,
+    skipOnboarding,
     parseDateKey,
     toDateKey,
   }
 }
 
-export type Store = ReturnType<typeof useStore>
+export type Store = ReturnType<typeof useStoreState>
+
+const StoreContext = createContext<Store | null>(null)
+
+/**
+ * One store for the whole app.
+ *
+ * Views used to each call `useStore()` themselves. That is fine on a single
+ * page, but real routes would each get their own copy and fight over
+ * localStorage. The provider keeps one copy at the layout.
+ */
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const store = useStoreState()
+  return createElement(StoreContext.Provider, { value: store }, children)
+}
+
+export function useStore(): Store {
+  const ctx = useContext(StoreContext)
+  if (!ctx) {
+    throw new Error('useStore must be used inside StoreProvider')
+  }
+  return ctx
+}

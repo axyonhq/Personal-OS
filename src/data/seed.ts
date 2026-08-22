@@ -126,7 +126,7 @@ export function createEmptyState(): AppState {
     revolutSync: { personalAccountIds: [], personalQueue: [], settledIds: [] },
     visionGoals: [],
     mentor: emptyMentorState(),
-    migrations: { companyFinanceAbsorbed: true },
+    migrations: { companyFinanceAbsorbed: true, onboarded: false },
     legacyCompanyCategoryIds: [],
   }
 }
@@ -309,5 +309,6 @@ export function createSeedState(): AppState {
     },
     visionGoals: [],
     mentor: emptyMentorState(),
+    migrations: { companyFinanceAbsorbed: true, onboarded: true },
   }
 }

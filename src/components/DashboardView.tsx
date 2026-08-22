@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PROJECT_MAP } from '../data/seed'
+import { useNavigateTab } from '../hooks/useNavigateTab'
 import type { Store } from '../hooks/useStore'
 import { DEEP_WORK_IDS, type DeepWorkId } from '../types'
 import { isAutopilotLocked } from '../utils/autopilotLocks'
@@ -54,6 +55,7 @@ export function DashboardView({
   store: Store
   onStartProject: (projectId: DeepWorkId) => void
 }) {
+  const navigateTab = useNavigateTab()
   const today = todayDateKey()
   const busy = !!store.state.activeTimer
   const [ritualOpen, setRitualOpen] = useState<RitualId | null>(null)
@@ -324,7 +326,7 @@ export function DashboardView({
           kicker="Money"
           title="Spend today"
           action={
-            <Button variant="quiet" size="sm" onClick={() => store.setActiveTab('personalFinances')}>
+            <Button variant="quiet" size="sm" onClick={() => navigateTab('personalFinances')}>
               Open
             </Button>
           }
@@ -357,7 +359,7 @@ export function DashboardView({
           kicker="Mentor"
           title="Open charge"
           action={
-            <Button variant="quiet" size="sm" onClick={() => store.setActiveTab('mentor')}>
+            <Button variant="quiet" size="sm" onClick={() => navigateTab('mentor')}>
               Review
             </Button>
           }
@@ -425,7 +427,7 @@ export function DashboardView({
           <button
             type="button"
             className="dash-surface"
-            onClick={() => store.setActiveTab('personalFinances')}
+            onClick={() => navigateTab('personalFinances')}
           >
             <Wallet aria-hidden="true" />
             <span>Money</span>
