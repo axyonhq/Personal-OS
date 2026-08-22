@@ -1920,6 +1920,20 @@ export function useStore() {
     })
   }, [update])
 
+  /** Replace one message's text — used to fill a bubble as tokens stream in. */
+  const setMentorMessageText = useCallback(
+    (id: string, text: string) => {
+      update((s) => ({
+        ...s,
+        mentor: {
+          ...s.mentor,
+          messages: s.mentor.messages.map((m) => (m.id === id ? { ...m, text } : m)),
+        },
+      }))
+    },
+    [update],
+  )
+
   const setMentorMessages = useCallback((messages: MentorMessage[]) => {
     update((s) => ({
       ...s,
@@ -2885,6 +2899,7 @@ export function useStore() {
     updateTimeEntryDate,
     discardTimer,
     appendMentorMessage,
+    setMentorMessageText,
     setMentorMessages,
     addJournalEntry,
     updateJournalEntry,
