@@ -6,6 +6,7 @@ import {
   mentorNotConfiguredResponse,
 } from '@/lib/mentor/openai'
 import { MENTOR_SYSTEM_PROMPT } from '@/lib/mentor/context'
+import { guardAiRoute } from '@/lib/api/guard'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -13,8 +14,13 @@ export const maxDuration = 60
 type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardAiRoute('mentor:chat', { limit: 20, windowMs: 60_000 })
+  if (guard.response) return guard.response
+
   try {
-    const client = getMentorOpenAIClient()
+    // Keep the OpenAI budget under maxDuration so a hang returns JSON we can
+    // show the user, rather than the platform killing the function first.
+    const client = getMentorOpenAIClient({ timeout: 50_000 })
     if (!client) return mentorNotConfiguredResponse()
 
     const body = (await req.json()) as {

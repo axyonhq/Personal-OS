@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { exchangeAuthorizationCode } from '@/lib/revolut/client'
+import { OAUTH_STATE_COOKIE, verifyOAuthState } from '@/lib/revolut/oauthState'
 
 function escapeHtml(value: string) {
   return value
@@ -45,10 +46,25 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // Proves this callback finishes a flow that this browser started, rather
+    // than one an attacker began against their own Revolut account.
+    const returnedState = req.nextUrl.searchParams.get('state')
+    const cookieState = req.cookies.get(OAUTH_STATE_COOKIE)?.value
+    if (!verifyOAuthState(returnedState, cookieState)) {
+      return html(
+        400,
+        `<!doctype html><html><body style="font-family:sans-serif;padding:2rem;max-width:720px">
+          <h1>Could not verify this request</h1>
+          <p>The security check for this connection did not match, so nothing was saved.</p>
+          <p>Start again from Personal OS: <a href="/api/revolut/oauth/start">reconnect Revolut</a>.</p>
+        </body></html>`,
+      )
+    }
+
     const tokens = await exchangeAuthorizationCode(code)
     const tokenJson = JSON.stringify(tokens.refresh_token)
 
-    return html(
+    const okResponse = html(
       200,
       `<!doctype html><html><body style="font-family:sans-serif;padding:2rem;max-width:720px">
         <h1>Revolut connected</h1>
@@ -63,6 +79,9 @@ export async function GET(req: NextRequest) {
         </script>
       </body></html>`,
     )
+    // One-time use: clear it so the same state cannot be replayed.
+    okResponse.cookies.delete({ name: OAUTH_STATE_COOKIE, path: '/api/revolut/oauth' })
+    return okResponse
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Token exchange failed'
     console.error('revolut oauth callback failed', err)
