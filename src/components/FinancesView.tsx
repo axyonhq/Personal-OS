@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Store } from '../hooks/useStore'
 import { CashAllocationPanel } from './finance/CashAllocationPanel'
 import { CashTrackerPanel } from './finance/CashTrackerPanel'
+import { FinanceInsights } from './finance/FinanceInsights'
 import { PersonalFinanceDashboard } from './finance/PersonalFinanceDashboard'
 import { RevolutSyncPanel } from './finance/RevolutSyncPanel'
 import { SetExpensesPanel } from './finance/SetExpensesPanel'
@@ -84,6 +85,8 @@ export function FinancesView({ store }: { store: Store }) {
           </button>
         </div>
       </header>
+
+      <FinanceInsights store={store} />
 
       <PersonalFinanceDashboard store={store} />
 
