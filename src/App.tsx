@@ -8,6 +8,7 @@ import { DashboardView } from './components/DashboardView'
 import { DeepWorkTimerHost } from './components/DeepWorkTimerHost'
 import { FinancesView } from './components/FinancesView'
 import { MentorView } from './components/MentorView'
+import { SyncStatus } from './components/SyncStatus'
 import { TasksView } from './components/TasksView'
 import { VisionView } from './components/VisionView'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
@@ -237,21 +238,7 @@ export default function App() {
             >
               Upload → cloud
             </button>
-            {store.cloudSync === 'loading' && (
-              <span className="status-pill desktop-only" title="Loading cloud state">
-                SYNC…
-              </span>
-            )}
-            {store.cloudSync === 'ready' && (
-              <span className="status-pill hit desktop-only" title="Saved to Supabase">
-                CLOUD
-              </span>
-            )}
-            {store.cloudSync === 'error' && (
-              <span className="status-pill miss desktop-only" title={store.cloudError || 'Cloud sync error'}>
-                SYNC ERR
-              </span>
-            )}
+            <SyncStatus store={store} />
             <UserButton />
           </div>
         </header>

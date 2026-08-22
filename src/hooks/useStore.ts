@@ -1,6 +1,6 @@
 import { useAuth, useSession } from '@clerk/nextjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
+import { createEmptyState, createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
   isSupabaseConfigured,
@@ -9,7 +9,7 @@ import {
   absorbLegacyCompanyFinance,
   applyRevolutCredentialsToBrowser,
   isRichFinanceLedger,
-  isThinCloudPayload,
+  isEmptyCloudPayload,
   mergeRevolutCredentials,
   mergeSessionSafeState,
   preferRicherFinanceLedger,
@@ -688,7 +688,7 @@ function dropSettledFromQueues(sync: RevolutSyncState): RevolutSyncState {
 }
 
 function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?: boolean }): AppState {
-  const seed = createSeedState()
+  const seed = createEmptyState()
   const today = todayDateKey()
   const emptyCompanySeed = seed.personalFinance
 
@@ -872,16 +872,23 @@ function loadState(): AppState {
     const rawV2 = localStorage.getItem(STORAGE_KEY)
     const rawV1 = localStorage.getItem('batcave-deep-work-os-v1')
     const raw = rawV2 ?? rawV1
-    if (!raw) return createSeedState()
+    if (!raw) return createEmptyState()
     return normalizeAppState(JSON.parse(raw) as Partial<AppState>, { recoverLocal: true })
   } catch {
-    return createSeedState()
+    return createEmptyState()
   }
 }
 
 export function useStore() {
   const { isLoaded: authLoaded, userId } = useAuth()
   const { session } = useSession()
+  /**
+   * Clerk hands back a new `session` object on every token refresh. Reading it
+   * through a ref keeps it out of effect deps, so a refresh cannot re-run the
+   * hydrate and overwrite whatever the user is editing.
+   */
+  const sessionRef = useRef(session)
+  sessionRef.current = session
   const [state, setState] = useState<AppState>(() => loadState())
   const [tick, setTick] = useState(0)
   const [cloudSync, setCloudSync] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -896,26 +903,43 @@ export function useStore() {
   const stateRef = useRef(state)
   stateRef.current = state
 
+  /** True once hydrate has settled, so nothing persists a pre-merge snapshot. */
+  const hydrateSettled = useRef(false)
+  /** Guards against re-hydrating the same user twice. */
+  const hydratedForUser = useRef<string | null>(null)
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    // Writing during hydrate can persist local-only state over data the cloud
+    // fetch is about to merge in, so wait for the merge to land first.
+    if (!hydrateSettled.current) return
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    } catch {
+      // Quota exceeded — the cloud row remains the source of truth.
+    }
     writeFinanceBackup(state.personalFinance)
   }, [state])
 
   const upsertCloudState = useCallback(
     async (next: AppState) => {
-      if (!userId || !session) throw new Error('Not signed in')
-      const client = createClerkSupabaseClient(() => session.getToken())
+      const activeSession = sessionRef.current
+      if (!userId || !activeSession) throw new Error('Not signed in')
+      const client = createClerkSupabaseClient(() => activeSession.getToken())
       if (!client) throw new Error('Supabase is not configured')
-      const payload = withLocalRevolutCredentials(next)
+      const updatedAt = new Date().toISOString()
+      const payload: AppState = {
+        ...withLocalRevolutCredentials(next),
+        cloudUpdatedAt: updatedAt,
+      }
       const { error } = await client.from('user_app_state').upsert({
         user_id: userId,
         state: payload,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       })
       if (error) throw new Error(error.message)
       return payload
     },
-    [userId, session],
+    [userId],
   )
 
   /** Always write the newest queued snapshot; drop stale mid-flight payloads. */
@@ -969,11 +993,16 @@ export function useStore() {
 
   // Load / seed cloud document once Clerk + Supabase are ready
   useEffect(() => {
-    if (!authLoaded || !userId || !session) return
+    if (!authLoaded || !userId || !sessionRef.current) return
     if (!isSupabaseConfigured()) {
+      hydrateSettled.current = true
       setCloudSync('idle')
       return
     }
+    // Hydrate is a one-shot per signed-in user. Re-running it would re-merge and
+    // re-publish state on top of live edits.
+    if (hydratedForUser.current === userId) return
+    hydratedForUser.current = userId
 
     let cancelled = false
     setCloudSync('loading')
@@ -981,8 +1010,15 @@ export function useStore() {
 
     ;(async () => {
       try {
-        const client = createClerkSupabaseClient(() => session.getToken())
+        const activeSession = sessionRef.current
+        if (!activeSession) {
+          hydrateSettled.current = true
+          hydratedForUser.current = null
+          return
+        }
+        const client = createClerkSupabaseClient(() => activeSession.getToken())
         if (!client) {
+          hydrateSettled.current = true
           setCloudSync('idle')
           return
         }
@@ -1001,6 +1037,8 @@ export function useStore() {
         if (cancelled) return
 
         if (error) {
+          hydrateSettled.current = true
+          hydratedForUser.current = null
           setCloudError(error.message)
           setCloudSync('error')
           return
@@ -1009,7 +1047,9 @@ export function useStore() {
         let chosen = local
         let source: 'local' | 'remote' = 'local'
 
-        if (data?.state && typeof data.state === 'object' && !isThinCloudPayload(data.state)) {
+        // Only skip a row that is genuinely empty (the column default). Any real
+        // row must be merged — discarding a small one loses cross-device data.
+        if (data?.state && typeof data.state === 'object' && !isEmptyCloudPayload(data.state)) {
           const remote = normalizeAppState(data.state as Partial<AppState>, {
             recoverLocal: true,
           })
@@ -1018,7 +1058,22 @@ export function useStore() {
             local.revolutCredentials,
           )
           const remoteReady = withLocalRevolutCredentials(remote)
-          const pick = preferRicherState(local, remoteReady)
+
+          // Prefer timestamps: a row written after our last sync came from
+          // another device and must win. Fall back to content volume only when
+          // this browser has never synced and so has no baseline to compare.
+          const remoteAt = Date.parse(data.updated_at || '') || 0
+          const lastSyncedAt = Date.parse(local.cloudUpdatedAt || '') || 0
+          let pick: { winner: AppState; source: 'local' | 'remote' }
+          if (lastSyncedAt > 0 && remoteAt > 0) {
+            pick =
+              remoteAt > lastSyncedAt
+                ? { winner: remoteReady, source: 'remote' }
+                : { winner: local, source: 'local' }
+          } else {
+            pick = preferRicherState(local, remoteReady)
+          }
+
           // Winner for bulk fields, but always keep union of sessions + any live timer.
           chosen = mergeSessionSafeState(pick.winner, pick.source === 'local' ? remoteReady : local)
           source = pick.source
@@ -1046,6 +1101,7 @@ export function useStore() {
         applyRevolutCredentialsToBrowser(saved.revolutCredentials)
         skipNextCloudSave.current = true
         stateRef.current = saved
+        hydrateSettled.current = true
         setState(saved)
         setCloudSource(source)
         setCloudSync('ready')
@@ -1054,6 +1110,10 @@ export function useStore() {
         }
       } catch (err) {
         if (cancelled) return
+        // Let local persistence resume — otherwise a cloud outage would also
+        // stop this browser from saving anything at all.
+        hydrateSettled.current = true
+        hydratedForUser.current = null
         setCloudError(err instanceof Error ? err.message : 'Cloud sync failed')
         setCloudSync('error')
       }
@@ -1062,11 +1122,19 @@ export function useStore() {
     return () => {
       cancelled = true
     }
-  }, [authLoaded, userId, session, upsertCloudState, enqueueCloudSave])
+  }, [authLoaded, userId, upsertCloudState, enqueueCloudSave])
+
+  // Signed-out or Supabase-less sessions never hydrate, so open the local
+  // persistence gate for them once auth has resolved.
+  useEffect(() => {
+    if (hydrateSettled.current) return
+    if (!authLoaded) return
+    if (!userId || !isSupabaseConfigured()) hydrateSettled.current = true
+  }, [authLoaded, userId])
 
   // Debounced cloud save after hydration
   useEffect(() => {
-    if (cloudSync !== 'ready' || !userId || !session) return
+    if (cloudSync !== 'ready' || !userId || !sessionRef.current) return
     if (!isSupabaseConfigured()) return
     if (skipNextCloudSave.current) {
       skipNextCloudSave.current = false
@@ -1081,7 +1149,7 @@ export function useStore() {
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current)
     }
-  }, [state, cloudSync, userId, session, enqueueCloudSave])
+  }, [state, cloudSync, userId, enqueueCloudSave])
 
   const pushBrowserToCloud = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -1091,12 +1159,12 @@ export function useStore() {
     }
     try {
       setCloudSync('loading')
-      const local = withLocalRevolutCredentials(loadState())
-      // Prefer in-memory state (includes unsaved edits) over a fresh localStorage read
-      const merged = preferRicherState(
-        withLocalRevolutCredentials(state),
-        local,
-      ).winner
+      const disk = withLocalRevolutCredentials(loadState())
+      const memory = withLocalRevolutCredentials(state)
+      // Prefer in-memory state (includes unsaved edits) over a fresh localStorage
+      // read, but union sessions and finance so the losing side's work survives.
+      const pick = preferRicherState(memory, disk)
+      const merged = mergeSessionSafeState(pick.winner, pick.source === 'local' ? disk : memory)
       const saved = await upsertCloudState(merged)
       applyRevolutCredentialsToBrowser(saved.revolutCredentials)
       skipNextCloudSave.current = true
@@ -2408,19 +2476,40 @@ export function useStore() {
     [update],
   )
 
+  /** Clear deep-work data back to blank. Finances and vision are kept. */
   const resetToSeed = useCallback(() => {
-    const seed = createSeedState()
+    const blank = createEmptyState()
     setState((s) => {
-      const next = {
-        ...seed,
+      const next: AppState = {
+        ...blank,
         personalFinance: s.personalFinance,
         revolutSync: s.revolutSync,
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
+        migrations: s.migrations,
+        legacyCompanyCategoryIds: s.legacyCompanyCategoryIds,
       }
+      stateRef.current = next
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       writeFinanceBackup(next.personalFinance)
+      return next
+    })
+  }, [])
+
+  /** Explicit opt-in demo content, so the app can be shown off safely. */
+  const loadSampleData = useCallback(() => {
+    setState((s) => {
+      const next: AppState = {
+        ...createSeedState(),
+        personalFinance: s.personalFinance,
+        revolutSync: s.revolutSync,
+        revolutCredentials: s.revolutCredentials,
+        migrations: s.migrations,
+        legacyCompanyCategoryIds: s.legacyCompanyCategoryIds,
+      }
+      stateRef.current = next
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       return next
     })
   }, [])
@@ -2724,6 +2813,7 @@ export function useStore() {
     removeVisionGoal,
     minutesFor,
     resetToSeed,
+    loadSampleData,
     parseDateKey,
     toDateKey,
   }

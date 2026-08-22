@@ -8050,3 +8050,82 @@ select:focus {
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+
+/* ============================================================
+   Cloud sync status — visible at every breakpoint
+   ============================================================ */
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sync-status-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.sync-status-ready {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.28);
+}
+
+.sync-status-loading .sync-status-dot {
+  animation: pulseLive 1.4s var(--ease) infinite;
+}
+
+.sync-status-error {
+  color: var(--danger);
+  border-color: rgba(255, 123, 130, 0.4);
+  background: var(--danger-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sync-status-error .sync-status-text {
+  display: grid;
+  gap: 0.05rem;
+  line-height: 1.25;
+}
+
+.sync-status-error .sync-status-text strong {
+  font-size: 0.68rem;
+}
+
+.sync-status-error .sync-status-text em {
+  font-style: normal;
+  font-size: 0.62rem;
+  opacity: 0.85;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-status-retry {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font: inherit;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.sync-status-retry:hover {
+  background: rgba(255, 123, 130, 0.16);
+}

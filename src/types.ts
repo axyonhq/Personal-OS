@@ -565,6 +565,12 @@ export interface AppState {
   /** One-time migrations already applied — stops them re-running every load. */
   migrations?: StateMigrations
   /**
+   * `updated_at` of the cloud row this browser last synced with. Lets hydrate
+   * tell "another device wrote since we last synced" apart from "we have local
+   * edits on top of the same base", instead of guessing from content volume.
+   */
+  cloudUpdatedAt?: string | null
+  /**
    * Category ids folded in from the legacy company ledger and still awaiting a
    * keep-or-remove decision. Cleared once the user chooses.
    */

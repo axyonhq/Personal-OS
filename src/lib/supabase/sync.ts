@@ -276,11 +276,17 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
   )
 }
 
-export function isThinCloudPayload(raw: unknown): boolean {
+/**
+ * Only true for a row that holds nothing at all — the `'{}'::jsonb` column
+ * default. Anything else is real user data and must be merged, never skipped.
+ *
+ * This deliberately replaces an older "is it rich enough?" score test, which
+ * discarded legitimate small cloud rows (a single logged session scored below
+ * the threshold) and so lost data when moving between devices.
+ */
+export function isEmptyCloudPayload(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return true
-  const keys = Object.keys(raw as object)
-  if (keys.length === 0) return true
-  return stateRichnessScore(raw as Partial<AppState>) < 8
+  return Object.keys(raw as object).length === 0
 }
 
 /**
