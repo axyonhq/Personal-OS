@@ -1,6 +1,7 @@
 import type { Store } from '../hooks/useStore'
 import type { ProjectId } from '../types'
 import { ProjectCard } from './ProjectCard'
+import { Button } from './ui/Button'
 
 export function TasksView({
   store,
@@ -13,13 +14,13 @@ export function TasksView({
     <div className="layout-stack tasks-stage">
       <div className="tasks-toolbar">
         <h2>Projects</h2>
-        <button
-          type="button"
-          className={`ghost-btn${store.state.showAllTasks ? ' active' : ''}`}
+        <Button
+          variant={store.state.showAllTasks ? 'secondary' : 'ghost'}
+          size="sm"
           onClick={() => store.setShowAllTasks(!store.state.showAllTasks)}
         >
           {store.state.showAllTasks ? 'Showing all tasks' : 'Show all tasks'}
-        </button>
+        </Button>
       </div>
 
       <div className="grid-projects">

@@ -1,51 +1,52 @@
+'use client'
+
+import {
+  Activity,
+  BrainCircuit,
+  CalendarClock,
+  Flame,
+  HeartPulse,
+  Moon,
+  Play,
+  Repeat,
+  Sparkles,
+  Sunrise,
+  Target,
+  Timer,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PROJECT_MAP } from '../data/seed'
+import { useNavigateTab } from '../hooks/useNavigateTab'
 import type { Store } from '../hooks/useStore'
 import { DEEP_WORK_IDS, type DeepWorkId } from '../types'
 import { isAutopilotLocked } from '../utils/autopilotLocks'
-import { formatMinutes, todayDateKey } from '../utils/time'
+import { needsMissDayRepair } from '../utils/dayChecks'
+import { formatMoney, spentOnDate, totalMonthlyExpenses } from '../utils/finance'
+import { blocksOnDate } from '../utils/recurrence'
+import { addDays, formatMinutes, todayDateKey, weekDays } from '../utils/time'
 import { AttentionAllocation } from './AttentionAllocation'
 import { EveningWindDown } from './autopilot/EveningWindDown'
 import { BodyEnergyLog } from './BodyEnergyLog'
 import { DailyNotes } from './DailyNotes'
 import { IdentityPanel } from './IdentityPanel'
 import { MentalRam } from './MentalRam'
-import { MissDayRepair, needsMissDayRepair } from './MissDayRepair'
+import { MissDayRepair } from './MissDayRepair'
 import { NonNegotiables } from './NonNegotiables'
 import { PauseAnalytics, SessionAnalytics } from './SessionAnalytics'
 import { TimeSummary } from './TimeSummary'
 import { WeekIntention } from './WeekIntention'
 import { WeeklyGoalsPanel } from './WeeklyGoalsPanel'
+import { Button } from './ui/Button'
+import { BarRow, MeterBar, ProgressRing, Sparkline } from './ui/Charts'
 import { Modal } from './ui/Modal'
+import { Badge, Card, EmptyState, Stat } from './ui/Surfaces'
 
 type RitualId = 'morning' | 'week'
 type CommandModal = 'identity' | 'mental' | 'habits' | 'analytics' | 'body' | null
 
-const RITUAL_CARDS: {
-  id: RitualId | 'evening'
-  title: string
-  name: string
-  desc: string
-}[] = [
-  {
-    id: 'morning',
-    title: 'Morning',
-    name: 'Morning rituals',
-    desc: 'Open when you need the checklist — otherwise stay clear',
-  },
-  {
-    id: 'evening',
-    title: 'Evening',
-    name: 'Evening Wind Down',
-    desc: 'Finance → body → tomorrow → tasks → journal photo into Mentor',
-  },
-  {
-    id: 'week',
-    title: 'Week',
-    name: 'Week rituals',
-    desc: 'Open when you need the checklist — otherwise stay clear',
-  },
-]
+const DAY_INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
 export function DashboardView({
   store,
@@ -54,144 +55,399 @@ export function DashboardView({
   store: Store
   onStartProject: (projectId: DeepWorkId) => void
 }) {
+  const navigateTab = useNavigateTab()
   const today = todayDateKey()
   const busy = !!store.state.activeTimer
   const [ritualOpen, setRitualOpen] = useState<RitualId | null>(null)
   const [windDownOpen, setWindDownOpen] = useState(false)
   const [commandModal, setCommandModal] = useState<CommandModal>(null)
   const [repairOpen, setRepairOpen] = useState(false)
-  const activeRitual = RITUAL_CARDS.find((card) => card.id === ritualOpen)
-  const repairNeeded = useMemo(() => needsMissDayRepair(store), [store.state])
+  const repairNeeded = useMemo(() => needsMissDayRepair(store.state), [store.state])
   const eveningLocked = isAutopilotLocked(store.state, 'evening')
 
+  const target = store.state.dailyDeepWorkTargetMinutes
+  const deepToday = store.deepWorkMinutesForDate(today)
+  const remaining = Math.max(0, target - deepToday)
+
+  // Last 30 days of deep work, for the momentum line.
+  const trend = useMemo(() => {
+    const byDate = new Map<string, number>()
+    for (const entry of store.state.timeEntries) {
+      if (!DEEP_WORK_IDS.includes(entry.projectId as DeepWorkId)) continue
+      byDate.set(entry.date, (byDate.get(entry.date) || 0) + entry.minutes)
+    }
+    return Array.from({ length: 30 }, (_, i) => byDate.get(addDays(today, i - 29)) || 0)
+  }, [store.state.timeEntries, today])
+
+  const deepWorkMinutesForDate = store.deepWorkMinutesForDate
+  const selectedDate = store.state.selectedDate
+  const week = useMemo(() => {
+    return weekDays(selectedDate).map((date, i) => ({
+      label: DAY_INITIALS[i],
+      value: deepWorkMinutesForDate(date),
+      target,
+      active: date === today,
+    }))
+  }, [deepWorkMinutesForDate, selectedDate, target, today])
+
+  const nextBlock = useMemo(() => {
+    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
+    return blocksOnDate(store.state.calendarBlocks, today)
+      .filter((b) => b.endMinutes > nowMinutes)
+      .sort((a, b) => a.startMinutes - b.startMinutes)[0]
+  }, [store.state.calendarBlocks, today])
+
+  const spentToday = spentOnDate(store.state.personalFinance, today)
+  const dailyBudget = totalMonthlyExpenses(store.state.personalFinance) / 30
+  const oneThing = store.state.dailyOneThing[today] || ''
+  const habits = store.state.habits
+  const openCharge = (store.state.mentor.charges || []).find((c) => c.status === 'open')
+
+  const trendTotal = trend.reduce((sum, v) => sum + v, 0)
+  const prevWeek = trend.slice(0, 7).reduce((s, v) => s + v, 0)
+  const lastWeek = trend.slice(-7).reduce((s, v) => s + v, 0)
+
   return (
-    <div className="dashboard dashboard-clean">
-      <p className="dashboard-lede">Center. Then move.</p>
+    <div className="dash">
+      {/* ---- Hero: today at a glance -------------------------------------- */}
+      <section className="dash-hero">
+        <div className="dash-hero-ring">
+          <ProgressRing
+            value={deepToday}
+            max={target}
+            size={168}
+            stroke={12}
+            tone={deepToday >= target ? 'accent' : 'accent'}
+            label={formatMinutes(deepToday)}
+            sublabel={`of ${formatMinutes(target)}`}
+          />
+        </div>
 
-      <WeeklyGoalsPanel store={store} />
-
-      {repairNeeded && !isAutopilotLocked(store.state, 'miss-repair') && (
-        <section className="miss-repair-banner">
-          <div>
-            <span className="field-label">Momentum leak</span>
-            <p>Yesterday slipped. Repair before the day drifts.</p>
+        <div className="dash-hero-copy">
+          <div className="dash-hero-head">
+            <p className="ui-kicker">Deep work today</p>
+            <h1 className="dash-hero-title">
+              {deepToday >= target
+                ? 'Target hit. Everything else is bonus.'
+                : remaining === target
+                  ? 'Nothing logged yet. Start the first block.'
+                  : `${formatMinutes(remaining)} left to hit target.`}
+            </h1>
           </div>
-          <button type="button" className="btn-primary" onClick={() => setRepairOpen(true)}>
-            Miss-day repair
-          </button>
+
+          <div className="dash-hero-stats">
+            <Stat
+              label="Streak"
+              value={store.targetStreak}
+              sub={store.targetStreak === 1 ? 'day on target' : 'days on target'}
+              tone={store.targetStreak > 0 ? 'accent' : 'muted'}
+              icon={<Flame />}
+            />
+            <Stat
+              label="This week"
+              value={formatMinutes(lastWeek)}
+              sub={
+                prevWeek > 0
+                  ? `${lastWeek >= prevWeek ? '+' : ''}${Math.round(((lastWeek - prevWeek) / prevWeek) * 100)}% vs prior`
+                  : 'no prior week yet'
+              }
+              icon={<TrendingUp />}
+            />
+            <Stat
+              label="Week hit rate"
+              value={
+                store.weekHitRate.counted > 0
+                  ? `${Math.round((store.weekHitRate.hits / store.weekHitRate.counted) * 100)}%`
+                  : '—'
+              }
+              sub={`${store.weekHitRate.hits}/${store.weekHitRate.counted} days at target`}
+              icon={<Target />}
+            />
+          </div>
+
+          {trendTotal > 0 && (
+            <div className="dash-trend">
+              <Sparkline values={trend} height={44} />
+              <span className="ui-kicker">Last 30 days</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ---- Repair banner ------------------------------------------------ */}
+      {repairNeeded && !isAutopilotLocked(store.state, 'miss-repair') && (
+        <section className="dash-alert">
+          <span className="dash-alert-icon" aria-hidden="true">
+            <Activity />
+          </span>
+          <div>
+            <p className="dash-alert-title">Yesterday slipped</p>
+            <p className="dash-alert-body">Name what broke before the day drifts too.</p>
+          </div>
+          <Button variant="primary" size="sm" onClick={() => setRepairOpen(true)}>
+            Repair
+          </Button>
         </section>
       )}
 
-      <section className="dashboard-section dashboard-timers">
-        <h2 className="dashboard-heading">Start deep work</h2>
-        <div className="dashboard-timer-grid">
+      {/* ---- Start deep work ---------------------------------------------- */}
+      <Card
+        kicker="Start a block"
+        title="Deep work"
+        action={<Badge tone={busy ? 'accent' : 'muted'} dot={busy}>{busy ? 'Running' : 'Idle'}</Badge>}
+      >
+        <div className="dash-timers">
           {DEEP_WORK_IDS.map((id) => {
             const project = PROJECT_MAP[id]
             let logged = store.minutesFor(id, 'day', today)
             if (store.state.activeTimer?.projectId === id) {
               logged += Math.floor(store.liveTimerSeconds / 60)
             }
-            const target = store.state.dailyDeepWorkSplit[id]
+            const slice = store.state.dailyDeepWorkSplit[id]
             const isLive = store.state.activeTimer?.projectId === id
             return (
               <button
                 key={id}
                 type="button"
-                className={`dashboard-timer-btn${isLive ? ' live' : ''}`}
+                className={`dash-timer${isLive ? ' is-live' : ''}`}
                 style={{ ['--project-color' as string]: project.color }}
                 disabled={busy && !isLive}
                 onClick={() => onStartProject(id)}
               >
-                <span className="dashboard-timer-name">{project.name}</span>
-                <span className="dashboard-timer-hours">
+                <span className="dash-timer-head">
+                  <span className="dash-timer-name">{project.name}</span>
+                  {isLive ? (
+                    <Timer className="dash-timer-glyph is-live" aria-hidden="true" />
+                  ) : (
+                    <Play className="dash-timer-glyph" aria-hidden="true" />
+                  )}
+                </span>
+                <span className="dash-timer-figure">
                   {formatMinutes(logged)}
-                  <span className="dashboard-timer-target">
-                    {' '}
-                    / {formatMinutes(target)}
-                  </span>
+                  <span className="dash-timer-target"> / {formatMinutes(slice)}</span>
                 </span>
-                <span className="dashboard-timer-cta">
-                  {isLive ? 'Timer running — open' : 'Start timer'}
+                <MeterBar value={logged} max={slice} />
+                <span className="dash-timer-cta">
+                  {isLive ? 'Running — open timer' : 'Start timer'}
                 </span>
               </button>
             )
           })}
         </div>
-      </section>
+      </Card>
 
-      <section className="action-board compact">
-        <header className="action-board-head">
-          <h2 className="action-board-title">Command surfaces</h2>
-          <p className="action-board-copy">
-            Identity, mental RAM, habits, and analytics stay out of the way.
+      {/* ---- Focus row ----------------------------------------------------- */}
+      <div className="dash-split">
+        <Card kicker="Today" title="The one thing">
+          <input
+            className="dash-onething"
+            type="text"
+            value={oneThing}
+            placeholder="If only one thing gets done today, what is it?"
+            onChange={(e) => store.setOneThing(today, e.target.value)}
+            aria-label="Today's one thing"
+          />
+          {nextBlock ? (
+            <div className="dash-next">
+              <CalendarClock aria-hidden="true" />
+              <span>
+                <strong>{nextBlock.title}</strong>
+                <em>
+                  {String(Math.floor(nextBlock.startMinutes / 60)).padStart(2, '0')}:
+                  {String(nextBlock.startMinutes % 60).padStart(2, '0')} — next on the calendar
+                </em>
+              </span>
+            </div>
+          ) : (
+            <div className="dash-next is-empty">
+              <CalendarClock aria-hidden="true" />
+              <span>
+                <strong>Nothing scheduled</strong>
+                <em>The rest of today is unplanned</em>
+              </span>
+            </div>
+          )}
+        </Card>
+
+        <Card kicker="This week" title="Deep work by day">
+          <BarRow bars={week} height={104} />
+        </Card>
+      </div>
+
+      {/* ---- Habits + money ------------------------------------------------ */}
+      <div className="dash-split">
+        <Card
+          kicker="Non-negotiables"
+          title="Habits"
+          action={
+            <Button variant="quiet" size="sm" onClick={() => setCommandModal('habits')}>
+              Manage
+            </Button>
+          }
+        >
+          {habits.length === 0 ? (
+            <EmptyState
+              icon={<Repeat />}
+              title="No habits yet"
+              body="Add the handful of daily actions you refuse to skip."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setCommandModal('habits')}>
+                  Add habits
+                </Button>
+              }
+            />
+          ) : (
+            <div className="dash-habits">
+              {habits.map((habit) => {
+                const done = habit.lastCompletedDate === today
+                return (
+                  <button
+                    key={habit.id}
+                    type="button"
+                    className={`dash-habit${done ? ' is-done' : ''}`}
+                    onClick={() => store.completeHabit(habit.id)}
+                    aria-pressed={done}
+                  >
+                    <span className="dash-habit-name">{habit.name}</span>
+                    {habit.streak > 0 && (
+                      <span className="dash-habit-streak">
+                        <Flame aria-hidden="true" />
+                        {habit.streak}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Card
+          kicker="Money"
+          title="Spend today"
+          action={
+            <Button variant="quiet" size="sm" onClick={() => navigateTab('personalFinances')}>
+              Open
+            </Button>
+          }
+        >
+          <div className="dash-money">
+            <div className="dash-money-figure">
+              <span className={spentToday > dailyBudget && dailyBudget > 0 ? 'is-over' : ''}>
+                {formatMoney(spentToday)}
+              </span>
+              {dailyBudget > 0 && <em>daily pace {formatMoney(dailyBudget)}</em>}
+            </div>
+            {dailyBudget > 0 ? (
+              <MeterBar
+                value={spentToday}
+                max={dailyBudget}
+                tone={spentToday > dailyBudget ? 'danger' : 'accent'}
+              />
+            ) : (
+              <p className="dash-money-hint">
+                Set your monthly expenses to see a daily pace here.
+              </p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* ---- Mentor nudge --------------------------------------------------- */}
+      {openCharge && (
+        <Card
+          kicker="Mentor"
+          title="Open charge"
+          action={
+            <Button variant="quiet" size="sm" onClick={() => navigateTab('mentor')}>
+              Review
+            </Button>
+          }
+        >
+          <p className="dash-charge">
+            <Sparkles aria-hidden="true" />
+            {openCharge.text}
           </p>
-        </header>
-        <div className="action-board-grid autopilot-five">
-          <button type="button" className="action-tile compact" onClick={() => setCommandModal('identity')}>
-            <span className="action-tile-kicker">90-day</span>
-            <span className="action-tile-name">Identity</span>
+        </Card>
+      )}
+
+      <WeeklyGoalsPanel store={store} />
+
+      {/* ---- Rituals -------------------------------------------------------- */}
+      <Card kicker="Operating cadence" title="Rituals">
+        <div className="dash-rituals">
+          <button type="button" className="dash-ritual" onClick={() => setRitualOpen('morning')}>
+            <Sunrise aria-hidden="true" />
+            <span>
+              <strong>Morning</strong>
+              <em>Open the day deliberately</em>
+            </span>
           </button>
-          <button type="button" className="action-tile compact" onClick={() => setCommandModal('mental')}>
-            <span className="action-tile-kicker">Mind</span>
-            <span className="action-tile-name">Intention & loops</span>
+          <button
+            type="button"
+            className={`dash-ritual is-accent${eveningLocked ? ' is-locked' : ''}`}
+            disabled={eveningLocked}
+            onClick={() => setWindDownOpen(true)}
+          >
+            <Moon aria-hidden="true" />
+            <span>
+              <strong>Evening wind down</strong>
+              <em>{eveningLocked ? 'Done today' : 'Finance, body, tomorrow, journal'}</em>
+            </span>
           </button>
-          <button type="button" className="action-tile compact" onClick={() => setCommandModal('habits')}>
-            <span className="action-tile-kicker">Rituals</span>
-            <span className="action-tile-name">Non-negotiables</span>
-          </button>
-          <button type="button" className="action-tile compact" onClick={() => setCommandModal('body')}>
-            <span className="action-tile-kicker">Signal</span>
-            <span className="action-tile-name">Body & energy</span>
-          </button>
-          <button type="button" className="action-tile compact" onClick={() => setCommandModal('analytics')}>
-            <span className="action-tile-kicker">Readouts</span>
-            <span className="action-tile-name">Time analytics</span>
+          <button type="button" className="dash-ritual" onClick={() => setRitualOpen('week')}>
+            <Repeat aria-hidden="true" />
+            <span>
+              <strong>Week</strong>
+              <em>Cadence and reset points</em>
+            </span>
           </button>
         </div>
-      </section>
+      </Card>
 
-      <section className="action-board compact">
-        <div className="action-board-stack">
-          {RITUAL_CARDS.map((card) => {
-            const locked = card.id === 'evening' && eveningLocked
-            return (
-              <button
-                key={card.id}
-                type="button"
-                className={`action-tile compact wide${locked ? ' disabled locked' : ''}${card.id === 'evening' && !locked ? ' accent' : ''}`}
-                disabled={locked}
-                onClick={() => {
-                  if (card.id === 'evening') {
-                    if (!locked) setWindDownOpen(true)
-                    return
-                  }
-                  setRitualOpen(card.id)
-                }}
-              >
-                <span className="action-tile-kicker">Operating cadence</span>
-                <span className="action-tile-name">{card.name}</span>
-                <span className="action-tile-desc">
-                  {locked ? 'Done today · locked' : card.desc}
-                </span>
-                {locked && <span className="tab-soon">Locked</span>}
-              </button>
-            )
-          })}
+      {/* ---- Command surfaces ------------------------------------------------ */}
+      <Card kicker="Deeper" title="Command surfaces">
+        <div className="dash-surfaces">
+          <button type="button" className="dash-surface" onClick={() => setCommandModal('identity')}>
+            <Target aria-hidden="true" />
+            <span>Identity</span>
+          </button>
+          <button type="button" className="dash-surface" onClick={() => setCommandModal('mental')}>
+            <BrainCircuit aria-hidden="true" />
+            <span>Mental OS</span>
+          </button>
+          <button type="button" className="dash-surface" onClick={() => setCommandModal('body')}>
+            <HeartPulse aria-hidden="true" />
+            <span>Body &amp; energy</span>
+          </button>
+          <button type="button" className="dash-surface" onClick={() => setCommandModal('analytics')}>
+            <Activity aria-hidden="true" />
+            <span>Analytics</span>
+          </button>
+          <button
+            type="button"
+            className="dash-surface"
+            onClick={() => navigateTab('personalFinances')}
+          >
+            <Wallet aria-hidden="true" />
+            <span>Money</span>
+          </button>
         </div>
-      </section>
+      </Card>
 
+      {/* ---- Modals ---------------------------------------------------------- */}
       <Modal
         open={ritualOpen !== null}
         onClose={() => setRitualOpen(null)}
-        title={activeRitual?.title ?? 'Rituals'}
+        title={ritualOpen === 'morning' ? 'Morning' : 'Week'}
         size="md"
       >
         {ritualOpen === 'morning' && (
           <ol className="dashboard-list">
-            <li>Coffee At Home</li>
+            <li>Coffee at home</li>
             <li>Breathwork</li>
-            <li>Water &amp; Salt</li>
-            <li>Write identity statement and set intentions</li>
+            <li>Water &amp; salt</li>
+            <li>Write the identity statement and set intentions</li>
             <li>Straight into deep work</li>
           </ol>
         )}
@@ -199,11 +455,11 @@ export function DashboardView({
           <div className="dashboard-week">
             <div className="dashboard-week-block">
               <span className="dashboard-week-when">Mon–Sun · Midday</span>
-              <p>Foot on the fucking gas. Retard mode. Execute.</p>
+              <p>Foot on the gas. Execute.</p>
             </div>
             <div className="dashboard-week-block">
               <span className="dashboard-week-when">Sunday · Afternoon</span>
-              <p>Gyroscope. Assess, plan, personal admin, analyse, go deep.</p>
+              <p>Assess, plan, personal admin, analyse, go deep.</p>
             </div>
             <div className="dashboard-week-block">
               <span className="dashboard-week-when">Sunday · Evening</span>
@@ -213,34 +469,54 @@ export function DashboardView({
         )}
       </Modal>
 
-      <EveningWindDown
-        store={store}
-        open={windDownOpen}
-        onClose={() => setWindDownOpen(false)}
-      />
+      <EveningWindDown store={store} open={windDownOpen} onClose={() => setWindDownOpen(false)} />
 
-      <Modal open={commandModal === 'identity'} onClose={() => setCommandModal(null)} title="90-day identity" size="lg">
+      <Modal
+        open={commandModal === 'identity'}
+        onClose={() => setCommandModal(null)}
+        title="90-day identity"
+        size="lg"
+      >
         <IdentityPanel store={store} />
       </Modal>
 
-      <Modal open={commandModal === 'mental'} onClose={() => setCommandModal(null)} title="Mental OS" size="lg">
+      <Modal
+        open={commandModal === 'mental'}
+        onClose={() => setCommandModal(null)}
+        title="Mental OS"
+        size="lg"
+      >
         <div className="layout-stack">
-          <WeeklyGoalsPanel store={store} />
           <WeekIntention store={store} />
           <MentalRam store={store} />
           <DailyNotes store={store} />
         </div>
       </Modal>
 
-      <Modal open={commandModal === 'habits'} onClose={() => setCommandModal(null)} title="Non-negotiables" size="md">
+      <Modal
+        open={commandModal === 'habits'}
+        onClose={() => setCommandModal(null)}
+        title="Non-negotiables"
+        size="md"
+      >
         <NonNegotiables store={store} />
       </Modal>
 
-      <Modal open={commandModal === 'body'} onClose={() => setCommandModal(null)} title="Body & energy" size="md">
+      <Modal
+        open={commandModal === 'body'}
+        onClose={() => setCommandModal(null)}
+        title="Body & energy"
+        size="md"
+      >
         <BodyEnergyLog store={store} date={today} />
       </Modal>
 
-      <Modal open={commandModal === 'analytics'} onClose={() => setCommandModal(null)} title="Time analytics" size="xl">
+      <Modal
+        open={commandModal === 'analytics'}
+        onClose={() => setCommandModal(null)}
+        title="Time analytics"
+        size="xl"
+      >
         <div className="analytics-stack">
           <div className="grid-2">
             <TimeSummary store={store} />

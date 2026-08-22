@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import type { Store } from '../hooks/useStore'
+import { useToast } from './ui/Toast'
 import { HudPanel } from './HudPanel'
 
 export function MentalRam({ store }: { store: Store }) {
+  const { toastUndo } = useToast()
   const [text, setText] = useState('')
 
   return (
@@ -19,7 +21,15 @@ export function MentalRam({ store }: { store: Store }) {
               {loop.done ? '✓' : ''}
             </button>
             <span className={`check-text${loop.done ? ' done' : ''}`}>{loop.text}</span>
-            <button type="button" className="x-btn" onClick={() => store.removeLoop(loop.id)}>
+            <button
+              type="button"
+              className="x-btn"
+              aria-label={`Delete loop: ${loop.text}`}
+              onClick={() => {
+                const undo = store.removeLoop(loop.id)
+                toastUndo('Open loop deleted', undo, loop.text)
+              }}
+            >
               ×
             </button>
           </li>

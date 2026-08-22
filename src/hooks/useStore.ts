@@ -1,6 +1,18 @@
+'use client'
+
 import { useAuth, useSession } from '@clerk/nextjs'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import { createEmptyState, createSeedState, PROJECT_MAP, PROJECTS, uid } from '../data/seed'
 import {
   createClerkSupabaseClient,
   isSupabaseConfigured,
@@ -9,13 +21,14 @@ import {
   absorbLegacyCompanyFinance,
   applyRevolutCredentialsToBrowser,
   isRichFinanceLedger,
-  isThinCloudPayload,
+  isEmptyCloudPayload,
   mergeRevolutCredentials,
   mergeSessionSafeState,
   preferRicherFinanceLedger,
   preferRicherState,
   withLocalRevolutCredentials,
 } from '../lib/supabase/sync'
+import { parseBackup, serializeBackup } from '../utils/backup'
 import type {
   ActiveTimer,
   AppState,
@@ -46,6 +59,7 @@ import type {
   SessionFeeling,
   SessionTag,
   SpendEntry,
+  StateMigrations,
   SummaryMode,
   AddTaskOptions,
   AutopilotCompletions,
@@ -96,6 +110,15 @@ import { repairJournalEntryDate } from '../utils/journalDate'
 
 const STORAGE_KEY = 'batcave-deep-work-os-v2'
 const FINANCE_BACKUP_KEY = 'batcave-finance-backup-v1'
+
+/**
+ * Caps on the fields that otherwise grow forever. The whole app state is one
+ * JSON blob in localStorage (~5MB ceiling), so unbounded arrays eventually stop
+ * every save. These two are bookkeeping and raw OCR text, not user history, so
+ * trimming them is safe.
+ */
+const MAX_SETTLED_IDS = 2000
+const MAX_JOURNAL_TEXT_CHARS = 20_000
 
 /** Active work ms for a timer — excludes pause time. */
 function activeTimerWorkMs(t: ActiveTimer, now = Date.now()): number {
@@ -216,7 +239,10 @@ function migrateMentorState(raw: unknown): MentorState {
               typeof j.sourceName === 'string' && j.sourceName.trim()
                 ? j.sourceName.trim()
                 : 'Journal page',
-            extractedText: typeof j.extractedText === 'string' ? j.extractedText : '',
+            extractedText:
+              typeof j.extractedText === 'string'
+                ? j.extractedText.slice(0, MAX_JOURNAL_TEXT_CHARS)
+                : '',
             status,
             createdAt:
               typeof j.createdAt === 'string' ? j.createdAt : new Date().toISOString(),
@@ -580,20 +606,34 @@ function readFinanceBackup(): {
 function writeFinanceBackup(personal: FinanceLedger) {
   if (!isRichFinanceLedger(personal)) return
   try {
-    // Preserve any legacy companyFinance still sitting in the backup blob so a
-    // later recovery pass can still absorb it into personal.
-    const existing = readFinanceBackup()
     localStorage.setItem(
       FINANCE_BACKUP_KEY,
-      JSON.stringify({
-        personalFinance: personal,
-        ...(existing?.companyFinance ? { companyFinance: existing.companyFinance } : {}),
-        savedAt: Date.now(),
-      }),
+      JSON.stringify({ personalFinance: personal, savedAt: Date.now() }),
     )
   } catch {
     // ignore quota errors
   }
+}
+
+/**
+ * Drop the legacy company ledger from the backup blob once it has been folded
+ * into personal. Leaving it there is what let company rows come back forever.
+ */
+function purgeLegacyCompanyFinanceBackup() {
+  try {
+    const raw = localStorage.getItem(FINANCE_BACKUP_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!('companyFinance' in parsed)) return
+    delete parsed.companyFinance
+    localStorage.setItem(FINANCE_BACKUP_KEY, JSON.stringify(parsed))
+  } catch {
+    // ignore
+  }
+}
+
+function isBillsPresetCategory(cat: FinanceLedger['categories'][number]): boolean {
+  return Boolean(cat.isPreset && !cat.parentId && cat.name.toLowerCase() === 'bills')
 }
 
 function withBackupTimestamp(
@@ -609,13 +649,15 @@ function migrateRevolutSync(
   fallback: RevolutSyncState,
 ): RevolutSyncState {
   if (!raw || typeof raw !== 'object') return fallback
+  // Newest-last dedupe, then keep only the tail. This list is pure bookkeeping
+  // to avoid re-importing transactions, and grew without bound before.
   const settledIds = [
     ...new Set(
       (Array.isArray(raw.settledIds) ? raw.settledIds : []).filter(
         (id): id is string => typeof id === 'string' && id.length > 0,
       ),
     ),
-  ]
+  ].slice(-MAX_SETTLED_IDS)
   const settled = new Set(settledIds)
   const keepQueue = (items: RevolutReviewItem[] | undefined) =>
     (Array.isArray(items) ? items : []).filter(
@@ -673,15 +715,23 @@ function dropSettledFromQueues(sync: RevolutSyncState): RevolutSyncState {
 }
 
 function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?: boolean }): AppState {
-  const seed = createSeedState()
+  const seed = createEmptyState()
   const today = todayDateKey()
   const emptyCompanySeed = seed.personalFinance
+
+  const migrations: StateMigrations = { ...(parsed.migrations || {}) }
+  // Once the legacy company ledger has been folded in we must never fold it
+  // again — re-running on every load is what kept resurrecting company rows
+  // inside personal finances.
+  const companyAlreadyAbsorbed = migrations.companyFinanceAbsorbed === true
 
   let personalFinance = migrateLedger(parsed.personalFinance, seed.personalFinance)
   // Older saves kept a separate company ledger — fold it into personal before
   // we drop the field, otherwise Set expenses shows Bills $0.
   let legacyCompanyFinance = migrateLedger(
-    (parsed as { companyFinance?: Partial<FinanceLedger> }).companyFinance,
+    companyAlreadyAbsorbed
+      ? undefined
+      : (parsed as { companyFinance?: Partial<FinanceLedger> }).companyFinance,
     emptyCompanySeed,
   )
 
@@ -697,10 +747,12 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           personalFinance,
           migrateLedger(older.personalFinance, seed.personalFinance),
         )
-        legacyCompanyFinance = preferRicherFinanceLedger(
-          legacyCompanyFinance,
-          migrateLedger(older.companyFinance, emptyCompanySeed),
-        )
+        if (!companyAlreadyAbsorbed) {
+          legacyCompanyFinance = preferRicherFinanceLedger(
+            legacyCompanyFinance,
+            migrateLedger(older.companyFinance, emptyCompanySeed),
+          )
+        }
       }
     } catch {
       // ignore
@@ -714,17 +766,35 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           backup.savedAt,
         ),
       )
-      legacyCompanyFinance = preferRicherFinanceLedger(
-        legacyCompanyFinance,
-        withBackupTimestamp(
-          migrateLedger(backup.companyFinance, emptyCompanySeed),
-          backup.savedAt,
-        ),
-      )
+      if (!companyAlreadyAbsorbed) {
+        legacyCompanyFinance = preferRicherFinanceLedger(
+          legacyCompanyFinance,
+          withBackupTimestamp(
+            migrateLedger(backup.companyFinance, emptyCompanySeed),
+            backup.savedAt,
+          ),
+        )
+      }
     }
   }
 
-  personalFinance = absorbLegacyCompanyFinance(personalFinance, legacyCompanyFinance)
+  // Ids carried over from the company ledger, so Money can offer a one-click
+  // cleanup instead of leaving the user to hunt them down by hand.
+  let legacyCompanyCategoryIds = Array.isArray(parsed.legacyCompanyCategoryIds)
+    ? parsed.legacyCompanyCategoryIds.filter((id): id is string => typeof id === 'string')
+    : []
+
+  if (!companyAlreadyAbsorbed) {
+    const companyIds = new Set(legacyCompanyFinance.categories.map((c) => c.id))
+    personalFinance = absorbLegacyCompanyFinance(personalFinance, legacyCompanyFinance)
+    // Flag company-sourced rows by id rather than by diffing, so rows absorbed
+    // on an earlier load are still detected.
+    legacyCompanyCategoryIds = personalFinance.categories
+      .filter((c) => companyIds.has(c.id) && !isBillsPresetCategory(c))
+      .map((c) => c.id)
+    migrations.companyFinanceAbsorbed = true
+    purgeLegacyCompanyFinanceBackup()
+  }
 
   // Legacy company finances tab → personal (via normalizeActiveTab)
   const activeTab = normalizeActiveTab((parsed as { activeTab?: unknown }).activeTab)
@@ -756,7 +826,7 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     ),
   )
 
-  return {
+  const normalized: AppState = {
     ...seed,
     ...(parsedClean as Partial<AppState>),
     // Always open on Bali “today” so the day label matches WITA
@@ -819,7 +889,29 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
+    migrations,
+    legacyCompanyCategoryIds,
   }
+
+  // People who already have a workspace should not get the first-run wizard.
+  if (!migrations.onboarded && looksLivedIn(normalized)) {
+    migrations.onboarded = true
+    normalized.migrations = { ...migrations }
+  }
+
+  return normalized
+}
+
+function looksLivedIn(state: AppState): boolean {
+  if (state.identityBody.trim()) return true
+  if (state.habits.length > 0) return true
+  if (state.timeEntries.length > 0) return true
+  if (state.visionGoals.length > 0) return true
+  if (Object.values(state.tasks).some((list) => list.length > 0)) return true
+  if (state.personalFinance.spends.length > 0) return true
+  if (state.personalFinance.categories.some((c) => !c.isPreset && c.amount > 0)) return true
+  if ((state.mentor.messages || []).some((m) => m.role !== 'system')) return true
+  return false
 }
 
 function loadState(): AppState {
@@ -827,21 +919,33 @@ function loadState(): AppState {
     const rawV2 = localStorage.getItem(STORAGE_KEY)
     const rawV1 = localStorage.getItem('batcave-deep-work-os-v1')
     const raw = rawV2 ?? rawV1
-    if (!raw) return createSeedState()
+    if (!raw) return createEmptyState()
     return normalizeAppState(JSON.parse(raw) as Partial<AppState>, { recoverLocal: true })
   } catch {
-    return createSeedState()
+    return createEmptyState()
   }
 }
 
-export function useStore() {
+export function useStoreState() {
   const { isLoaded: authLoaded, userId } = useAuth()
   const { session } = useSession()
+  /**
+   * Clerk hands back a new `session` object on every token refresh. Reading it
+   * through a ref keeps it out of effect deps, so a refresh cannot re-run the
+   * hydrate and overwrite whatever the user is editing.
+   */
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+  const hasSession = Boolean(session)
   const [state, setState] = useState<AppState>(() => loadState())
   const [tick, setTick] = useState(0)
   const [cloudSync, setCloudSync] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [cloudSource, setCloudSource] = useState<'local' | 'remote' | null>(null)
+  /** True once the first local/cloud merge has finished, so first-run UI can show. */
+  const [hydrateReady, setHydrateReady] = useState(false)
+  /** True when localStorage rejected a write, so offline copies have stopped. */
+  const [storageFull, setStorageFull] = useState(false)
   const skipNextCloudSave = useRef(false)
   const saveTimer = useRef<number | null>(null)
   /** Coalesce overlapping cloud upserts so an older in-flight write cannot land last. */
@@ -851,26 +955,46 @@ export function useStore() {
   const stateRef = useRef(state)
   stateRef.current = state
 
+  /** True once hydrate has settled, so nothing persists a pre-merge snapshot. */
+  const hydrateSettled = useRef(false)
+  /** Guards against re-hydrating the same user twice. */
+  const hydratedForUser = useRef<string | null>(null)
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    // Writing during hydrate can persist local-only state over data the cloud
+    // fetch is about to merge in, so wait for the merge to land first.
+    if (!hydrateSettled.current) return
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      setStorageFull(false)
+    } catch {
+      // Out of quota. The cloud row is still the source of truth, but the user
+      // needs to know this browser has stopped keeping an offline copy.
+      setStorageFull(true)
+    }
     writeFinanceBackup(state.personalFinance)
   }, [state])
 
   const upsertCloudState = useCallback(
     async (next: AppState) => {
-      if (!userId || !session) throw new Error('Not signed in')
-      const client = createClerkSupabaseClient(() => session.getToken())
+      const activeSession = sessionRef.current
+      if (!userId || !activeSession) throw new Error('Not signed in')
+      const client = createClerkSupabaseClient(() => activeSession.getToken())
       if (!client) throw new Error('Supabase is not configured')
-      const payload = withLocalRevolutCredentials(next)
+      const updatedAt = new Date().toISOString()
+      const payload: AppState = {
+        ...withLocalRevolutCredentials(next),
+        cloudUpdatedAt: updatedAt,
+      }
       const { error } = await client.from('user_app_state').upsert({
         user_id: userId,
         state: payload,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       })
       if (error) throw new Error(error.message)
       return payload
     },
-    [userId, session],
+    [userId],
   )
 
   /** Always write the newest queued snapshot; drop stale mid-flight payloads. */
@@ -924,11 +1048,17 @@ export function useStore() {
 
   // Load / seed cloud document once Clerk + Supabase are ready
   useEffect(() => {
-    if (!authLoaded || !userId || !session) return
+    if (!authLoaded || !userId || !hasSession) return
     if (!isSupabaseConfigured()) {
+      hydrateSettled.current = true
+      setHydrateReady(true)
       setCloudSync('idle')
       return
     }
+    // Hydrate is a one-shot per signed-in user. Re-running it would re-merge and
+    // re-publish state on top of live edits.
+    if (hydratedForUser.current === userId) return
+    hydratedForUser.current = userId
 
     let cancelled = false
     setCloudSync('loading')
@@ -936,8 +1066,18 @@ export function useStore() {
 
     ;(async () => {
       try {
-        const client = createClerkSupabaseClient(() => session.getToken())
+        const activeSession = sessionRef.current
+        if (!activeSession) {
+          hydrateSettled.current = true
+          hydratedForUser.current = null
+          setHydrateReady(true)
+          setCloudSync('idle')
+          return
+        }
+        const client = createClerkSupabaseClient(() => activeSession.getToken())
         if (!client) {
+          hydrateSettled.current = true
+          setHydrateReady(true)
           setCloudSync('idle')
           return
         }
@@ -956,6 +1096,9 @@ export function useStore() {
         if (cancelled) return
 
         if (error) {
+          hydrateSettled.current = true
+          hydratedForUser.current = null
+          setHydrateReady(true)
           setCloudError(error.message)
           setCloudSync('error')
           return
@@ -964,7 +1107,9 @@ export function useStore() {
         let chosen = local
         let source: 'local' | 'remote' = 'local'
 
-        if (data?.state && typeof data.state === 'object' && !isThinCloudPayload(data.state)) {
+        // Only skip a row that is genuinely empty (the column default). Any real
+        // row must be merged — discarding a small one loses cross-device data.
+        if (data?.state && typeof data.state === 'object' && !isEmptyCloudPayload(data.state)) {
           const remote = normalizeAppState(data.state as Partial<AppState>, {
             recoverLocal: true,
           })
@@ -973,7 +1118,22 @@ export function useStore() {
             local.revolutCredentials,
           )
           const remoteReady = withLocalRevolutCredentials(remote)
-          const pick = preferRicherState(local, remoteReady)
+
+          // Prefer timestamps: a row written after our last sync came from
+          // another device and must win. Fall back to content volume only when
+          // this browser has never synced and so has no baseline to compare.
+          const remoteAt = Date.parse(data.updated_at || '') || 0
+          const lastSyncedAt = Date.parse(local.cloudUpdatedAt || '') || 0
+          let pick: { winner: AppState; source: 'local' | 'remote' }
+          if (lastSyncedAt > 0 && remoteAt > 0) {
+            pick =
+              remoteAt > lastSyncedAt
+                ? { winner: remoteReady, source: 'remote' }
+                : { winner: local, source: 'local' }
+          } else {
+            pick = preferRicherState(local, remoteReady)
+          }
+
           // Winner for bulk fields, but always keep union of sessions + any live timer.
           chosen = mergeSessionSafeState(pick.winner, pick.source === 'local' ? remoteReady : local)
           source = pick.source
@@ -1001,6 +1161,8 @@ export function useStore() {
         applyRevolutCredentialsToBrowser(saved.revolutCredentials)
         skipNextCloudSave.current = true
         stateRef.current = saved
+        hydrateSettled.current = true
+        setHydrateReady(true)
         setState(saved)
         setCloudSource(source)
         setCloudSync('ready')
@@ -1009,6 +1171,11 @@ export function useStore() {
         }
       } catch (err) {
         if (cancelled) return
+        // Let local persistence resume — otherwise a cloud outage would also
+        // stop this browser from saving anything at all.
+        hydrateSettled.current = true
+        hydratedForUser.current = null
+        setHydrateReady(true)
         setCloudError(err instanceof Error ? err.message : 'Cloud sync failed')
         setCloudSync('error')
       }
@@ -1017,11 +1184,22 @@ export function useStore() {
     return () => {
       cancelled = true
     }
-  }, [authLoaded, userId, session, upsertCloudState, enqueueCloudSave])
+  }, [authLoaded, userId, hasSession, upsertCloudState, enqueueCloudSave])
+
+  // Signed-out or Supabase-less sessions never hydrate, so open the local
+  // persistence gate for them once auth has resolved.
+  useEffect(() => {
+    if (hydrateSettled.current) return
+    if (!authLoaded) return
+    if (!userId || !isSupabaseConfigured()) {
+      hydrateSettled.current = true
+      setHydrateReady(true)
+    }
+  }, [authLoaded, userId])
 
   // Debounced cloud save after hydration
   useEffect(() => {
-    if (cloudSync !== 'ready' || !userId || !session) return
+    if (cloudSync !== 'ready' || !userId || !sessionRef.current) return
     if (!isSupabaseConfigured()) return
     if (skipNextCloudSave.current) {
       skipNextCloudSave.current = false
@@ -1036,7 +1214,7 @@ export function useStore() {
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current)
     }
-  }, [state, cloudSync, userId, session, enqueueCloudSave])
+  }, [state, cloudSync, userId, enqueueCloudSave])
 
   const pushBrowserToCloud = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -1046,12 +1224,12 @@ export function useStore() {
     }
     try {
       setCloudSync('loading')
-      const local = withLocalRevolutCredentials(loadState())
-      // Prefer in-memory state (includes unsaved edits) over a fresh localStorage read
-      const merged = preferRicherState(
-        withLocalRevolutCredentials(state),
-        local,
-      ).winner
+      const disk = withLocalRevolutCredentials(loadState())
+      const memory = withLocalRevolutCredentials(state)
+      // Prefer in-memory state (includes unsaved edits) over a fresh localStorage
+      // read, but union sessions and finance so the losing side's work survives.
+      const pick = preferRicherState(memory, disk)
+      const merged = mergeSessionSafeState(pick.winner, pick.source === 'local' ? disk : memory)
       const saved = await upsertCloudState(merged)
       applyRevolutCredentialsToBrowser(saved.revolutCredentials)
       skipNextCloudSave.current = true
@@ -1292,9 +1470,23 @@ export function useStore() {
     }))
   }, [update])
 
-  const removeLoop = useCallback((id: string) => {
-    update((s) => ({ ...s, openLoops: s.openLoops.filter((l) => l.id !== id) }))
-  }, [update])
+  const removeLoop = useCallback(
+    (id: string): (() => void) => {
+      const index = stateRef.current.openLoops.findIndex((l) => l.id === id)
+      const removed = index === -1 ? null : stateRef.current.openLoops[index]
+      update((s) => ({ ...s, openLoops: s.openLoops.filter((l) => l.id !== id) }))
+      return () => {
+        if (!removed) return
+        update((s) => {
+          if (s.openLoops.some((l) => l.id === removed.id)) return s
+          const next = [...s.openLoops]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, openLoops: next }
+        })
+      }
+    },
+    [update],
+  )
 
   const addReminder = useCallback((text: string) => {
     const trimmed = text.trim()
@@ -1338,9 +1530,23 @@ export function useStore() {
     }))
   }, [update])
 
-  const removeHabit = useCallback((id: string) => {
-    update((s) => ({ ...s, habits: s.habits.filter((h) => h.id !== id) }))
-  }, [update])
+  const removeHabit = useCallback(
+    (id: string): (() => void) => {
+      const index = stateRef.current.habits.findIndex((h) => h.id === id)
+      const removed = index === -1 ? null : stateRef.current.habits[index]
+      update((s) => ({ ...s, habits: s.habits.filter((h) => h.id !== id) }))
+      return () => {
+        if (!removed) return
+        update((s) => {
+          if (s.habits.some((h) => h.id === removed.id)) return s
+          const next = [...s.habits]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, habits: next }
+        })
+      }
+    },
+    [update],
+  )
 
   const toggleTask = useCallback((projectId: ProjectId, taskId: string) => {
     update((s) => ({
@@ -1507,15 +1713,39 @@ export function useStore() {
     [update],
   )
 
-  const removeTask = useCallback((projectId: ProjectId, taskId: string) => {
-    update((s) => ({
-      ...s,
-      tasks: {
-        ...s.tasks,
-        [projectId]: s.tasks[projectId].filter((t) => t.id !== taskId),
-      },
-    }))
-  }, [update])
+  /**
+   * Removes a task and hands back a function that puts it back where it was.
+   *
+   * Returning the undo from the store keeps the snapshot next to the data, so
+   * callers can offer "Undo" without reimplementing restore logic.
+   */
+  const removeTask = useCallback(
+    (projectId: ProjectId, taskId: string): (() => void) => {
+      const list = stateRef.current.tasks[projectId] || []
+      const index = list.findIndex((t) => t.id === taskId)
+      const removed = index === -1 ? null : list[index]
+
+      update((s) => ({
+        ...s,
+        tasks: {
+          ...s.tasks,
+          [projectId]: s.tasks[projectId].filter((t) => t.id !== taskId),
+        },
+      }))
+
+      return () => {
+        if (!removed) return
+        update((s) => {
+          const current = s.tasks[projectId] || []
+          if (current.some((t) => t.id === removed.id)) return s
+          const next = [...current]
+          next.splice(Math.min(index, next.length), 0, removed)
+          return { ...s, tasks: { ...s.tasks, [projectId]: next } }
+        })
+      }
+    },
+    [update],
+  )
 
   const setSummaryMode = useCallback((summaryMode: SummaryMode) => update({ summaryMode }), [update])
   const setCalendarMonth = useCallback((calendarMonth: string) => update({ calendarMonth }), [update])
@@ -1736,6 +1966,20 @@ export function useStore() {
     })
   }, [update])
 
+  /** Replace one message's text — used to fill a bubble as tokens stream in. */
+  const setMentorMessageText = useCallback(
+    (id: string, text: string) => {
+      update((s) => ({
+        ...s,
+        mentor: {
+          ...s.mentor,
+          messages: s.mentor.messages.map((m) => (m.id === id ? { ...m, text } : m)),
+        },
+      }))
+    },
+    [update],
+  )
+
   const setMentorMessages = useCallback((messages: MentorMessage[]) => {
     update((s) => ({
       ...s,
@@ -1815,36 +2059,47 @@ export function useStore() {
       const openKeys = new Set(
         charges.filter((c) => c.status === 'open').map((c) => mentorChargeKey(c.kind, c.text)),
       )
+      // Replace entries rather than mutating them: these objects are still
+      // referenced by the previous state, and React 19 may reuse that snapshot.
       const upsert = (kind: MentorChargeKind, text: string, actioned: boolean) => {
         const key = mentorChargeKey(kind, text)
-        const existingOpen = charges.find(
+        const openIndex = charges.findIndex(
           (c) => c.status === 'open' && mentorChargeKey(c.kind, c.text) === key,
         )
-        if (existingOpen) {
-          existingOpen.sourceInsightId = next.id
-          existingOpen.updatedAt = now
-          if (actioned) {
-            existingOpen.status = 'actioned'
-            existingOpen.actionedAt = now
-            existingOpen.installKind = existingOpen.installKind || 'manual'
-            openKeys.delete(key)
+        if (openIndex !== -1) {
+          const existingOpen = charges[openIndex]
+          charges[openIndex] = {
+            ...existingOpen,
+            sourceInsightId: next.id,
+            updatedAt: now,
+            ...(actioned
+              ? {
+                  status: 'actioned' as const,
+                  actionedAt: now,
+                  installKind: existingOpen.installKind || ('manual' as const),
+                }
+              : {}),
           }
+          if (actioned) openKeys.delete(key)
           return
         }
         if (openKeys.has(key)) return
         // Raised again after they cleared it — reopen. Accountability is the point.
-        const cleared = charges.find(
+        const clearedIndex = charges.findIndex(
           (c) =>
             mentorChargeKey(c.kind, c.text) === key &&
             (c.status === 'actioned' || c.status === 'dismissed'),
         )
-        if (cleared && !actioned) {
-          cleared.status = 'open'
-          cleared.sourceInsightId = next.id
-          cleared.updatedAt = now
-          cleared.actionedAt = undefined
-          cleared.actionNote = undefined
-          cleared.installKind = undefined
+        if (clearedIndex !== -1 && !actioned) {
+          charges[clearedIndex] = {
+            ...charges[clearedIndex],
+            status: 'open',
+            sourceInsightId: next.id,
+            updatedAt: now,
+            actionedAt: undefined,
+            actionNote: undefined,
+            installKind: undefined,
+          }
           openKeys.add(key)
           return
         }
@@ -2103,6 +2358,46 @@ export function useStore() {
     [patchLedger],
   )
 
+  /**
+   * Remove the categories folded in from the retired company ledger, along with
+   * the spends and allocation lines that pointed at them.
+   */
+  const removeLegacyCompanyCategories = useCallback(() => {
+    update((s) => {
+      const ids = new Set(s.legacyCompanyCategoryIds || [])
+      if (ids.size === 0) return { ...s, legacyCompanyCategoryIds: [] }
+      const ledger = s.personalFinance
+      for (const cat of ledger.categories) {
+        if (cat.parentId && ids.has(cat.parentId)) ids.add(cat.id)
+      }
+      return {
+        ...s,
+        legacyCompanyCategoryIds: [],
+        personalFinance: {
+          ...ledger,
+          categories: ledger.categories.filter((c) => !ids.has(c.id)),
+          spends: ledger.spends.filter(
+            (s2) => !(s2.kind === 'category' && s2.categoryId && ids.has(s2.categoryId)),
+          ),
+          allocations: ledger.allocations
+            .map((a) => ({
+              ...a,
+              lines: a.lines.filter(
+                (l) => !(l.kind === 'category' && l.categoryId && ids.has(l.categoryId)),
+              ),
+            }))
+            .filter((a) => a.lines.length > 0),
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    })
+  }, [update])
+
+  /** Keep the legacy company rows — just stop asking about them. */
+  const keepLegacyCompanyCategories = useCallback(() => {
+    update({ legacyCompanyCategoryIds: [] })
+  }, [update])
+
   const addCashAllocation = useCallback(
     (
       realm: FinanceRealm,
@@ -2323,22 +2618,79 @@ export function useStore() {
     [update],
   )
 
+  /** Clear deep-work data back to blank. Finances and vision are kept. */
   const resetToSeed = useCallback(() => {
-    const seed = createSeedState()
+    const blank = createEmptyState()
     setState((s) => {
-      const next = {
-        ...seed,
+      const next: AppState = {
+        ...blank,
         personalFinance: s.personalFinance,
         revolutSync: s.revolutSync,
         visionGoals: s.visionGoals,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
+        migrations: s.migrations,
+        legacyCompanyCategoryIds: s.legacyCompanyCategoryIds,
       }
+      stateRef.current = next
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       writeFinanceBackup(next.personalFinance)
       return next
     })
   }, [])
+
+  /** Explicit opt-in demo content, so the app can be shown off safely. */
+  const loadSampleData = useCallback(() => {
+    setState((s) => {
+      const next: AppState = {
+        ...createSeedState(),
+        personalFinance: s.personalFinance,
+        revolutSync: s.revolutSync,
+        revolutCredentials: s.revolutCredentials,
+        migrations: { ...s.migrations, onboarded: true },
+        legacyCompanyCategoryIds: s.legacyCompanyCategoryIds,
+      }
+      stateRef.current = next
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const exportBackup = useCallback(() => serializeBackup(stateRef.current), [])
+
+  const importBackup = useCallback((raw: string) => {
+    const parsed = parseBackup(raw)
+    const next = normalizeAppState(parsed, { recoverLocal: false })
+    next.revolutCredentials = stateRef.current.revolutCredentials
+    next.migrations = { ...next.migrations, onboarded: true }
+    hydrateSettled.current = true
+    stateRef.current = next
+    setState(next)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      setStorageFull(true)
+    }
+    writeFinanceBackup(next.personalFinance)
+  }, [])
+
+  const completeOnboarding = useCallback(
+    (patch: Partial<Pick<AppState, 'identityBody' | 'identityQuestion' | 'dailyDeepWorkTargetMinutes'>>) => {
+      update((s) => ({
+        ...s,
+        ...patch,
+        migrations: { ...s.migrations, onboarded: true },
+      }))
+    },
+    [update],
+  )
+
+  const skipOnboarding = useCallback(() => {
+    update((s) => ({
+      ...s,
+      migrations: { ...s.migrations, onboarded: true },
+    }))
+  }, [update])
 
   const addVisionGoal = useCallback(
     (input: { title: string; body: string }) => {
@@ -2429,26 +2781,49 @@ export function useStore() {
   )
 
   const targetStreak = useMemo(() => {
+    // Re-run each second while a timer is live so today's streak stays current.
+    void tick
+    // Index once instead of rescanning every entry for each of up to 365 days.
+    const deepMinutesByDate = new Map<string, number>()
+    const datesWithEntries = new Set<string>()
+    for (const entry of state.timeEntries) {
+      datesWithEntries.add(entry.date)
+      if (!isDeepWorkId(entry.projectId)) continue
+      deepMinutesByDate.set(entry.date, (deepMinutesByDate.get(entry.date) || 0) + entry.minutes)
+    }
+
+    // Count a running timer too, so the streak agrees with hitTarget instead of
+    // reading zero until the session is saved.
+    if (state.activeTimer && isDeepWorkId(state.activeTimer.projectId)) {
+      const liveDate = todayDateKey(new Date(state.activeTimer.sessionStartedAt))
+      const liveMinutes = Math.floor(activeTimerWorkMs(state.activeTimer) / 60000)
+      if (liveMinutes > 0) {
+        datesWithEntries.add(liveDate)
+        deepMinutesByDate.set(liveDate, (deepMinutesByDate.get(liveDate) || 0) + liveMinutes)
+      }
+    }
+
     let streak = 0
     let cursor = state.selectedDate
-    if (!hitTarget(cursor)) {
+    // Today still in progress should not break a streak built up to yesterday.
+    if ((deepMinutesByDate.get(cursor) || 0) < state.dailyDeepWorkTargetMinutes) {
       cursor = addDays(cursor, -1)
     }
     for (let i = 0; i < 365; i++) {
-      const mins = state.timeEntries
-        .filter((e) => e.date === cursor && isDeepWorkId(e.projectId))
-        .reduce((s, e) => s + e.minutes, 0)
-      const hasData = state.timeEntries.some((e) => e.date === cursor)
-      if (!hasData && mins === 0) break
-      if (mins >= state.dailyDeepWorkTargetMinutes) {
-        streak += 1
-        cursor = addDays(cursor, -1)
-      } else {
-        break
-      }
+      const mins = deepMinutesByDate.get(cursor) || 0
+      if (!datesWithEntries.has(cursor) && mins === 0) break
+      if (mins < state.dailyDeepWorkTargetMinutes) break
+      streak += 1
+      cursor = addDays(cursor, -1)
     }
     return streak
-  }, [state.selectedDate, state.timeEntries, state.dailyDeepWorkTargetMinutes, hitTarget])
+  }, [
+    state.selectedDate,
+    state.timeEntries,
+    state.activeTimer,
+    state.dailyDeepWorkTargetMinutes,
+    tick,
+  ])
 
   const weekHitRate = useMemo(() => {
     const days = weekDays(state.selectedDate)
@@ -2547,6 +2922,8 @@ export function useStore() {
     cloudSync,
     cloudError,
     cloudSource,
+    hydrateReady,
+    storageFull,
     pushBrowserToCloud,
     projects: PROJECTS,
     liveTimerSeconds,
@@ -2605,6 +2982,7 @@ export function useStore() {
     updateTimeEntryDate,
     discardTimer,
     appendMentorMessage,
+    setMentorMessageText,
     setMentorMessages,
     addJournalEntry,
     updateJournalEntry,
@@ -2621,6 +2999,8 @@ export function useStore() {
     addExpenseCategory,
     updateExpenseCategory,
     removeExpenseCategory,
+    removeLegacyCompanyCategories,
+    keepLegacyCompanyCategories,
     addCashAllocation,
     removeCashAllocation,
     addSpend,
@@ -2637,9 +3017,36 @@ export function useStore() {
     removeVisionGoal,
     minutesFor,
     resetToSeed,
+    loadSampleData,
+    exportBackup,
+    importBackup,
+    completeOnboarding,
+    skipOnboarding,
     parseDateKey,
     toDateKey,
   }
 }
 
-export type Store = ReturnType<typeof useStore>
+export type Store = ReturnType<typeof useStoreState>
+
+const StoreContext = createContext<Store | null>(null)
+
+/**
+ * One store for the whole app.
+ *
+ * Views used to each call `useStore()` themselves. That is fine on a single
+ * page, but real routes would each get their own copy and fight over
+ * localStorage. The provider keeps one copy at the layout.
+ */
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const store = useStoreState()
+  return createElement(StoreContext.Provider, { value: store }, children)
+}
+
+export function useStore(): Store {
+  const ctx = useContext(StoreContext)
+  if (!ctx) {
+    throw new Error('useStore must be used inside StoreProvider')
+  }
+  return ctx
+}

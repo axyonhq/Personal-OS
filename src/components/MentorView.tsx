@@ -35,7 +35,8 @@ export function MentorView({ store }: { store: Store }) {
     [store.state.timeEntries],
   )
   const journalReady = mentor.journalEntries.filter((j) => j.status === 'extracted').length
-  const charges = mentor.charges || []
+  // Memoized so the derived lists below do not recompute on every render.
+  const charges = useMemo(() => mentor.charges || [], [mentor.charges])
   const openCharges = useMemo(
     () => charges.filter((c) => c.status === 'open'),
     [charges],
@@ -82,9 +83,34 @@ export function MentorView({ store }: { store: Store }) {
           history: history.slice(0, -1),
         }),
       })
-      const data = (await res.json()) as { reply?: string; error?: string }
-      if (!res.ok) throw new Error(data.error || 'Mentor unavailable')
-      store.appendMentorMessage({ role: 'mentor', text: data.reply || '…' })
+
+      if (!res.ok) {
+        // Failures still come back as JSON; only the success path streams.
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(data.error || 'Mentor unavailable')
+      }
+
+      if (!res.body) throw new Error('Mentor returned no response body')
+
+      // Render tokens as they arrive instead of blocking on the whole reply.
+      const messageId = `msg-stream-${Date.now()}`
+      store.appendMentorMessage({ id: messageId, role: 'mentor', text: '' })
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let reply = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        reply += decoder.decode(value, { stream: true })
+        store.setMentorMessageText(messageId, reply)
+      }
+      reply += decoder.decode()
+
+      if (reply.includes('[stream-error]')) {
+        setError(reply.split('[stream-error]')[1]?.trim() || 'Mentor stream failed')
+      }
+      store.setMentorMessageText(messageId, reply.trim() || '…')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Mentor chat failed'
       setError(message)

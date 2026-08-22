@@ -78,6 +78,63 @@ function sessionEntry(
   }
 }
 
+function emptyWeeklyGoalSlots() {
+  return [0, 1, 2].map(() => ({ id: uid('wgoal'), text: '', hit: null, why: '', visionGoalId: null }))
+}
+
+/**
+ * A genuinely blank workspace. This is what a new browser or a signed-out user
+ * starts from.
+ *
+ * Do not substitute `createSeedState()` here. The demo carries enough content to
+ * win the local-vs-cloud richness comparison, so a fresh browser could overwrite
+ * real cloud data with sample data.
+ */
+export function createEmptyState(): AppState {
+  const billsId = uid('cat')
+  const today = todayDateKey()
+  return {
+    selectedDate: today,
+    activeTab: 'dashboard',
+    identityTitle: 'WHO I AM FOR THE NEXT 90 DAYS',
+    identityQuestion: '',
+    identityBody: '',
+    weekIntention: '',
+    openLoops: [],
+    reminders: [],
+    habits: [],
+    tasks: { chase: [], myProject: [], rav: [], personal: [], sundayAdmin: [] },
+    timeEntries: [],
+    calendarBlocks: [],
+    activeTimer: null,
+    summaryMode: 'day',
+    calendarMonth: todayMonthKey(),
+    // Starting targets, not personal content — a 0h target would make the
+    // dashboard meaningless on day one.
+    dailyDeepWorkTargetMinutes: 6 * 60,
+    dailyDeepWorkSplit: { chase: 2 * 60, myProject: 3 * 60, rav: 1 * 60 },
+    showAllTasks: false,
+    dailyOneThing: {},
+    bodyLogs: {},
+    weeklyGoals: emptyWeeklyGoalSlots(),
+    weeklyGoalsWeekStart: startOfWeekMonday(today),
+    weeklyGoalsArchive: [],
+    weekReflections: {},
+    lastSaturdayDumpSunday: null,
+    autopilotCompletions: { ...EMPTY_AUTOPILOT_COMPLETIONS },
+    personalFinance: emptyFinanceLedger(billsId),
+    revolutSync: { personalAccountIds: [], personalQueue: [], settledIds: [] },
+    visionGoals: [],
+    mentor: emptyMentorState(),
+    migrations: { companyFinanceAbsorbed: true, onboarded: false },
+    legacyCompanyCategoryIds: [],
+  }
+}
+
+/**
+ * Sample workspace used only by the explicit "load sample data" action, so the
+ * app can be demoed without touching real data. Never used as a load fallback.
+ */
 export function createSeedState(): AppState {
   const personalBillsId = uid('cat')
   const today = todayDateKey()
@@ -252,5 +309,6 @@ export function createSeedState(): AppState {
     },
     visionGoals: [],
     mentor: emptyMentorState(),
+    migrations: { companyFinanceAbsorbed: true, onboarded: true },
   }
 }

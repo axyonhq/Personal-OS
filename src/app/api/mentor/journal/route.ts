@@ -11,6 +11,7 @@ import {
   parseFlexibleJournalDate,
 } from '@/utils/journalDate'
 import { zonedParts } from '@/utils/time'
+import { guardAiRoute } from '@/lib/api/guard'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -73,8 +74,13 @@ function parseModelPayload(raw: string, now: Date): {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardAiRoute('mentor:journal', { limit: 20, windowMs: 60_000 })
+  if (guard.response) return guard.response
+
   try {
-    const client = getMentorOpenAIClient()
+    // Keep the OpenAI budget inside maxDuration (90s) so a hang surfaces as a
+    // readable JSON error instead of a platform-level timeout page.
+    const client = getMentorOpenAIClient({ timeout: 80_000 })
     if (!client) return mentorNotConfiguredResponse()
 
     const body = (await req.json()) as {

@@ -6,8 +6,10 @@ import {
 } from '../hooks/useStore'
 import { todayDateKey } from '../utils/time'
 import { HudPanel } from './HudPanel'
+import { useToast } from './ui/Toast'
 
 export function NonNegotiables({ store }: { store: Store }) {
+  const { toastUndo } = useToast()
   const [name, setName] = useState('')
   const [adding, setAdding] = useState(false)
   const today = todayDateKey()
@@ -50,7 +52,10 @@ export function NonNegotiables({ store }: { store: Store }) {
                 className="x-btn visible habit-remove"
                 title="Remove habit"
                 aria-label={`Remove ${habit.name}`}
-                onClick={() => store.removeHabit(habit.id)}
+                onClick={() => {
+                  const undo = store.removeHabit(habit.id)
+                  toastUndo('Habit removed', undo, habit.name)
+                }}
               >
                 ×
               </button>

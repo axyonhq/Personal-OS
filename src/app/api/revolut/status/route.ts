@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { assertAppSecret, jsonError } from '@/lib/revolut/http'
+import { assertAppSecret, assertSignedIn, jsonError } from '@/lib/revolut/http'
 import {
   createRevolutClient,
   isRevolutConfigured,
@@ -8,6 +8,9 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
+    const signedInError = await assertSignedIn()
+    if (signedInError) return signedInError
+
     const secretError = assertAppSecret(req)
     if (secretError) return secretError
 

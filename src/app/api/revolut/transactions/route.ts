@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { assertAppSecret, jsonError } from '@/lib/revolut/http'
+import { assertAppSecret, assertSignedIn, jsonError } from '@/lib/revolut/http'
 import {
   createRevolutClient,
   dayBoundsIso,
@@ -8,6 +8,10 @@ import {
   withRotatedToken,
 } from '@/lib/revolut/client'
 import { isInternalRevolutTransaction } from '@/lib/revolut/internal'
+
+export const runtime = 'nodejs'
+/** Paginates up to 20 pages per account, so give it room beyond the default. */
+export const maxDuration = 120
 
 function normalizeAccountIds(raw: string | null) {
   if (!raw) return []
@@ -76,6 +80,9 @@ function normalizeTransaction(
 
 export async function GET(req: NextRequest) {
   try {
+    const authError = await assertSignedIn()
+    if (authError) return authError
+
     const secretError = assertAppSecret(req)
     if (secretError) return secretError
 

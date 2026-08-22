@@ -506,6 +506,18 @@ export interface RevolutCredentials {
   refreshToken: string
 }
 
+/**
+ * One-time data migrations already applied to this state. Without these flags a
+ * migration re-runs on every load, which is how the legacy company ledger kept
+ * reappearing inside personal finances.
+ */
+export interface StateMigrations {
+  /** Legacy `companyFinance` ledger folded into `personalFinance` (one-time). */
+  companyFinanceAbsorbed?: boolean
+  /** First-run setup finished (or skipped). */
+  onboarded?: boolean
+}
+
 export interface AppState {
   selectedDate: string
   activeTab: AppTab
@@ -552,6 +564,19 @@ export interface AppState {
   visionGoals: VisionGoal[]
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
+  /** One-time migrations already applied — stops them re-running every load. */
+  migrations?: StateMigrations
+  /**
+   * `updated_at` of the cloud row this browser last synced with. Lets hydrate
+   * tell "another device wrote since we last synced" apart from "we have local
+   * edits on top of the same base", instead of guessing from content volume.
+   */
+  cloudUpdatedAt?: string | null
+  /**
+   * Category ids folded in from the legacy company ledger and still awaiting a
+   * keep-or-remove decision. Cleared once the user chooses.
+   */
+  legacyCompanyCategoryIds?: string[]
 }
 
 export type SummaryMode = AppState['summaryMode']

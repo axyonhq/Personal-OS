@@ -11,7 +11,8 @@ import { EveningWindDown } from './autopilot/EveningWindDown'
 import { SaturdayDump } from './autopilot/SaturdayDump'
 import { SundayAdmin } from './autopilot/SundayAdmin'
 import { SundayCenter } from './autopilot/SundayCenter'
-import { MissDayRepair, needsMissDayRepair } from './MissDayRepair'
+import { MissDayRepair } from './MissDayRepair'
+import { needsMissDayRepair } from '../utils/dayChecks'
 import { WeeklyGoalsPanel } from './WeeklyGoalsPanel'
 
 const ROUTINES: {
@@ -65,7 +66,7 @@ export function AutopilotView({
   const [sundayOpen, setSundayOpen] = useState(false)
   const [repairOpen, setRepairOpen] = useState(false)
 
-  const repairNeeded = useMemo(() => needsMissDayRepair(store), [store.state])
+  const repairNeeded = useMemo(() => needsMissDayRepair(store.state), [store.state])
 
   const openRoutine = (id: AutopilotRoutineId) => {
     if (isAutopilotLocked(store.state, id)) return

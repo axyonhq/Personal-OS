@@ -10,12 +10,17 @@ import {
   MENTOR_SYNTHESIS_TIMEOUT_MS,
   runMentorSynthesis,
 } from '@/lib/mentor/runSynthesis'
+import { guardAiRoute } from '@/lib/api/guard'
 
 export const runtime = 'nodejs'
 /** Pro plan allows up to 300s; keep headroom above the in-process OpenAI budget. */
 export const maxDuration = 120
 
 export async function POST(req: NextRequest) {
+  // Synthesis is the most expensive call in the app, so it gets the tightest cap.
+  const guard = await guardAiRoute('mentor:analyze', { limit: 6, windowMs: 60_000 })
+  if (guard.response) return guard.response
+
   try {
     const client = getMentorOpenAIClient({ timeout: MENTOR_SYNTHESIS_TIMEOUT_MS + 5_000 })
     if (!client) return mentorNotConfiguredResponse()

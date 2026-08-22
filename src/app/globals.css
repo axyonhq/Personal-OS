@@ -1,3 +1,7 @@
+@import '../styles/tokens.css';
+@import '../styles/primitives.css';
+@import '../styles/dashboard.css';
+
 /* ── Atelier OS design system ────────────────────────────────── */
 :root {
   /* Surfaces — dimensional ink, never flat black */
@@ -29,7 +33,9 @@
   /* Text hierarchy */
   --text: #eef5f0;
   --text-muted: #9aaba0;
-  --text-dim: #617068;
+  /* Was #617068 (3.7:1 on --bg) which fails WCAG AA. This clears 4.5:1 on every
+     surface in the palette, including the lightest (--bg-elevated). */
+  --text-dim: #7c8d84;
 
   /* Semantic */
   --danger: #ff7b82;
@@ -8014,3 +8020,164 @@ select:focus {
   font-size: 0.85rem;
 }
 
+
+/* ============================================================
+   Legacy company ledger cleanup banner
+   ============================================================ */
+.legacy-company-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid rgba(232, 184, 74, 0.28);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(232, 184, 74, 0.08), var(--bg-panel));
+  box-shadow: var(--panel-highlight);
+}
+
+.legacy-company-copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: min(100%, 22rem);
+  flex: 1 1 22rem;
+}
+
+.legacy-company-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.legacy-company-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ============================================================
+   Cloud sync status — visible at every breakpoint
+   ============================================================ */
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sync-status-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.sync-status-ready {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.28);
+}
+
+.sync-status-loading .sync-status-dot {
+  animation: pulseLive 1.4s var(--ease) infinite;
+}
+
+.sync-status-error {
+  color: var(--danger);
+  border-color: rgba(255, 123, 130, 0.4);
+  background: var(--danger-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sync-status-error .sync-status-text {
+  display: grid;
+  gap: 0.05rem;
+  line-height: 1.25;
+}
+
+.sync-status-error .sync-status-text strong {
+  font-size: 0.68rem;
+}
+
+.sync-status-error .sync-status-text em {
+  font-style: normal;
+  font-size: 0.62rem;
+  opacity: 0.85;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-status-retry {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font: inherit;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.sync-status-retry:hover {
+  background: rgba(255, 123, 130, 0.16);
+}
+
+/* ============================================================
+   Keyboard focus — every interactive element gets a visible ring
+   ============================================================ */
+
+/*
+ * Previously only three elements had :focus-visible styles, so keyboard users
+ * could not see where they were on buttons, nav items or tabs.
+ *
+ * :focus-visible (not :focus) means mouse clicks stay clean while keyboard and
+ * assistive-tech navigation always shows the ring.
+ */
+:where(
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex='-1'])
+):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Dialog shells are focused programmatically on open; no ring needed there. */
+.modal:focus-visible,
+.platform-modal:focus-visible {
+  outline: none;
+}
+
+/* Custom checkbox: the real input is visually hidden, so mirror focus onto
+   the styled box or it is impossible to see where you are. */
+.platform-check input:focus-visible + *,
+.platform-check input:focus-visible ~ * {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Disabled text was as low as ~1.6:1 against the panel. Keep it clearly
+   secondary, but readable. */
+.rail-item.disabled,
+.app-tab .tab-soon {
+  opacity: 0.75;
+}

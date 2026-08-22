@@ -1,0 +1,116 @@
+/* ============================================================================
+   Design tokens
+   ----------------------------------------------------------------------------
+   One source of truth for type, space, radius, elevation and motion.
+
+   Before this file the palette was tokenised but sizing was not: roughly 102
+   one-off rem values and 72 hand-written radii meant edges never landed on a
+   shared grid. Everything below is on a 4px rhythm so components line up by
+   construction rather than by eye.
+
+   Colour tokens still live in globals.css :root. These are additive, so
+   existing rules keep working while views migrate across.
+   ========================================================================= */
+
+:root {
+  /* --- Type scale ------------------------------------------------------- */
+  --text-2xs: 0.6875rem; /* 11px — micro labels, mono kickers */
+  --text-xs: 0.75rem; /* 12px — captions, pills */
+  --text-sm: 0.8125rem; /* 13px — secondary UI */
+  --text-base: 0.875rem; /* 14px — body default */
+  --text-md: 0.9375rem; /* 15px — emphasised body */
+  --text-lg: 1.0625rem; /* 17px — card titles */
+  --text-xl: 1.25rem; /* 20px — section headings */
+  --text-2xl: 1.5rem; /* 24px — view headings */
+  --text-3xl: 1.875rem; /* 30px — page titles */
+  --text-4xl: 2.25rem; /* 36px — hero numbers */
+  --text-5xl: 3rem; /* 48px — timer digits */
+
+  /* --- Line heights ----------------------------------------------------- */
+  --leading-none: 1;
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* --- Letter spacing --------------------------------------------------- */
+  --tracking-tighter: -0.03em; /* display headings */
+  --tracking-tight: -0.011em; /* body */
+  --tracking-normal: 0;
+  --tracking-wide: 0.08em; /* mono labels */
+  --tracking-wider: 0.14em; /* uppercase kickers */
+
+  /* --- Font weights ----------------------------------------------------- */
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* --- Spacing (4px rhythm) --------------------------------------------- */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0-5: 0.125rem; /* 2px */
+  --space-1: 0.25rem; /* 4px */
+  --space-1-5: 0.375rem; /* 6px */
+  --space-2: 0.5rem; /* 8px */
+  --space-2-5: 0.625rem; /* 10px */
+  --space-3: 0.75rem; /* 12px */
+  --space-3-5: 0.875rem; /* 14px */
+  --space-4: 1rem; /* 16px */
+  --space-5: 1.5rem; /* 24px */
+  --space-6: 2rem; /* 32px */
+  --space-7: 2.5rem; /* 40px */
+  --space-8: 3rem; /* 48px */
+  --space-10: 4rem; /* 64px */
+  --space-12: 6rem; /* 96px */
+
+  /* --- Radius ----------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+  --radius-full: 999px;
+
+  /* --- Elevation -------------------------------------------------------- */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --elev-2: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --elev-3: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --elev-4: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --elev-5: 0 28px 72px rgba(0, 0, 0, 0.42);
+
+  /* --- Motion ----------------------------------------------------------- */
+  --duration-fast: 120ms;
+  --duration-slower: 480ms;
+
+  /* --- Layering --------------------------------------------------------- */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-dock: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-palette: 70;
+  --z-onboard: 80;
+
+  /* --- Layout ----------------------------------------------------------- */
+  --container-max: 1280px;
+  --container-wide: 1480px;
+
+  /* --- Breakpoints (reference; CSS cannot use vars in media queries) -----
+     xs 480 · sm 640 · md 768 · lg 1024 · xl 1280 · 2xl 1536
+     Use these six only, so behaviour is predictable across views.          */
+}
+
+/* Honour the OS setting for reduced motion everywhere, not per component. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration: 0.01ms;
+    --duration-slow: 0.01ms;
+    --duration-slower: 0.01ms;
+  }
+}

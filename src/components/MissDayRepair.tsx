@@ -2,34 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../hooks/useStore'
-import { habitDisplayStreak, isHabitDoneOn } from '../hooks/useStore'
 import { isDeepWorkId } from '../types'
 import { addDays, formatLongDate, formatMinutes, todayDateKey } from '../utils/time'
 import { ModalPortal } from './ui/ModalPortal'
-
-export function needsMissDayRepair(store: Store): boolean {
-  const today = todayDateKey()
-  if (store.state.autopilotCompletions?.missRepairDate === today) return false
-
-  const yesterday = addDays(today, -1)
-  const yMinutes = store.state.timeEntries
-    .filter((e) => e.date === yesterday && isDeepWorkId(e.projectId))
-    .reduce((s, e) => s + e.minutes, 0)
-  const hadDeepWorkData = store.state.timeEntries.some((e) => e.date === yesterday)
-  const missedTarget =
-    hadDeepWorkData && yMinutes < store.state.dailyDeepWorkTargetMinutes
-
-  // Habit that was recently active but skipped yesterday (and not already done today)
-  const habitMiss = store.state.habits.some((h) => {
-    if (!h.lastCompletedDate) return false
-    if (isHabitDoneOn(h, yesterday) || isHabitDoneOn(h, today)) return false
-    const recentlyActive =
-      h.lastCompletedDate >= addDays(yesterday, -3) || habitDisplayStreak(h, today) > 0
-    return recentlyActive
-  })
-
-  return missedTarget || habitMiss
-}
 
 export function MissDayRepair({
   store,
