@@ -46,6 +46,7 @@ import type {
   SessionFeeling,
   SessionTag,
   SpendEntry,
+  StateMigrations,
   SummaryMode,
   AddTaskOptions,
   AutopilotCompletions,
@@ -580,20 +581,34 @@ function readFinanceBackup(): {
 function writeFinanceBackup(personal: FinanceLedger) {
   if (!isRichFinanceLedger(personal)) return
   try {
-    // Preserve any legacy companyFinance still sitting in the backup blob so a
-    // later recovery pass can still absorb it into personal.
-    const existing = readFinanceBackup()
     localStorage.setItem(
       FINANCE_BACKUP_KEY,
-      JSON.stringify({
-        personalFinance: personal,
-        ...(existing?.companyFinance ? { companyFinance: existing.companyFinance } : {}),
-        savedAt: Date.now(),
-      }),
+      JSON.stringify({ personalFinance: personal, savedAt: Date.now() }),
     )
   } catch {
     // ignore quota errors
   }
+}
+
+/**
+ * Drop the legacy company ledger from the backup blob once it has been folded
+ * into personal. Leaving it there is what let company rows come back forever.
+ */
+function purgeLegacyCompanyFinanceBackup() {
+  try {
+    const raw = localStorage.getItem(FINANCE_BACKUP_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!('companyFinance' in parsed)) return
+    delete parsed.companyFinance
+    localStorage.setItem(FINANCE_BACKUP_KEY, JSON.stringify(parsed))
+  } catch {
+    // ignore
+  }
+}
+
+function isBillsPresetCategory(cat: FinanceLedger['categories'][number]): boolean {
+  return Boolean(cat.isPreset && !cat.parentId && cat.name.toLowerCase() === 'bills')
 }
 
 function withBackupTimestamp(
@@ -677,11 +692,19 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
   const today = todayDateKey()
   const emptyCompanySeed = seed.personalFinance
 
+  const migrations: StateMigrations = { ...(parsed.migrations || {}) }
+  // Once the legacy company ledger has been folded in we must never fold it
+  // again — re-running on every load is what kept resurrecting company rows
+  // inside personal finances.
+  const companyAlreadyAbsorbed = migrations.companyFinanceAbsorbed === true
+
   let personalFinance = migrateLedger(parsed.personalFinance, seed.personalFinance)
   // Older saves kept a separate company ledger — fold it into personal before
   // we drop the field, otherwise Set expenses shows Bills $0.
   let legacyCompanyFinance = migrateLedger(
-    (parsed as { companyFinance?: Partial<FinanceLedger> }).companyFinance,
+    companyAlreadyAbsorbed
+      ? undefined
+      : (parsed as { companyFinance?: Partial<FinanceLedger> }).companyFinance,
     emptyCompanySeed,
   )
 
@@ -697,10 +720,12 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           personalFinance,
           migrateLedger(older.personalFinance, seed.personalFinance),
         )
-        legacyCompanyFinance = preferRicherFinanceLedger(
-          legacyCompanyFinance,
-          migrateLedger(older.companyFinance, emptyCompanySeed),
-        )
+        if (!companyAlreadyAbsorbed) {
+          legacyCompanyFinance = preferRicherFinanceLedger(
+            legacyCompanyFinance,
+            migrateLedger(older.companyFinance, emptyCompanySeed),
+          )
+        }
       }
     } catch {
       // ignore
@@ -714,17 +739,35 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           backup.savedAt,
         ),
       )
-      legacyCompanyFinance = preferRicherFinanceLedger(
-        legacyCompanyFinance,
-        withBackupTimestamp(
-          migrateLedger(backup.companyFinance, emptyCompanySeed),
-          backup.savedAt,
-        ),
-      )
+      if (!companyAlreadyAbsorbed) {
+        legacyCompanyFinance = preferRicherFinanceLedger(
+          legacyCompanyFinance,
+          withBackupTimestamp(
+            migrateLedger(backup.companyFinance, emptyCompanySeed),
+            backup.savedAt,
+          ),
+        )
+      }
     }
   }
 
-  personalFinance = absorbLegacyCompanyFinance(personalFinance, legacyCompanyFinance)
+  // Ids carried over from the company ledger, so Money can offer a one-click
+  // cleanup instead of leaving the user to hunt them down by hand.
+  let legacyCompanyCategoryIds = Array.isArray(parsed.legacyCompanyCategoryIds)
+    ? parsed.legacyCompanyCategoryIds.filter((id): id is string => typeof id === 'string')
+    : []
+
+  if (!companyAlreadyAbsorbed) {
+    const companyIds = new Set(legacyCompanyFinance.categories.map((c) => c.id))
+    personalFinance = absorbLegacyCompanyFinance(personalFinance, legacyCompanyFinance)
+    // Flag company-sourced rows by id rather than by diffing, so rows absorbed
+    // on an earlier load are still detected.
+    legacyCompanyCategoryIds = personalFinance.categories
+      .filter((c) => companyIds.has(c.id) && !isBillsPresetCategory(c))
+      .map((c) => c.id)
+    migrations.companyFinanceAbsorbed = true
+    purgeLegacyCompanyFinanceBackup()
+  }
 
   // Legacy company finances tab → personal (via normalizeActiveTab)
   const activeTab = normalizeActiveTab((parsed as { activeTab?: unknown }).activeTab)
@@ -819,6 +862,8 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
+    migrations,
+    legacyCompanyCategoryIds,
   }
 }
 
@@ -2103,6 +2148,46 @@ export function useStore() {
     [patchLedger],
   )
 
+  /**
+   * Remove the categories folded in from the retired company ledger, along with
+   * the spends and allocation lines that pointed at them.
+   */
+  const removeLegacyCompanyCategories = useCallback(() => {
+    update((s) => {
+      const ids = new Set(s.legacyCompanyCategoryIds || [])
+      if (ids.size === 0) return { ...s, legacyCompanyCategoryIds: [] }
+      const ledger = s.personalFinance
+      for (const cat of ledger.categories) {
+        if (cat.parentId && ids.has(cat.parentId)) ids.add(cat.id)
+      }
+      return {
+        ...s,
+        legacyCompanyCategoryIds: [],
+        personalFinance: {
+          ...ledger,
+          categories: ledger.categories.filter((c) => !ids.has(c.id)),
+          spends: ledger.spends.filter(
+            (s2) => !(s2.kind === 'category' && s2.categoryId && ids.has(s2.categoryId)),
+          ),
+          allocations: ledger.allocations
+            .map((a) => ({
+              ...a,
+              lines: a.lines.filter(
+                (l) => !(l.kind === 'category' && l.categoryId && ids.has(l.categoryId)),
+              ),
+            }))
+            .filter((a) => a.lines.length > 0),
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    })
+  }, [update])
+
+  /** Keep the legacy company rows — just stop asking about them. */
+  const keepLegacyCompanyCategories = useCallback(() => {
+    update({ legacyCompanyCategoryIds: [] })
+  }, [update])
+
   const addCashAllocation = useCallback(
     (
       realm: FinanceRealm,
@@ -2621,6 +2706,8 @@ export function useStore() {
     addExpenseCategory,
     updateExpenseCategory,
     removeExpenseCategory,
+    removeLegacyCompanyCategories,
+    keepLegacyCompanyCategories,
     addCashAllocation,
     removeCashAllocation,
     addSpend,

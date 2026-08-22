@@ -13,9 +13,41 @@ type FinanceModal = 'allocate' | 'expenses' | 'spend' | 'revolut' | 'wishlist' |
 export function FinancesView({ store }: { store: Store }) {
   const [modal, setModal] = useState<FinanceModal>(null)
   const pendingReview = store.state.revolutSync.personalQueue.length
+  const legacyIds = store.state.legacyCompanyCategoryIds ?? []
+  const legacyNames = legacyIds
+    .map((id) => store.state.personalFinance.categories.find((c) => c.id === id)?.name)
+    .filter((name): name is string => Boolean(name))
 
   return (
     <div className="layout-stack finance-view finance-command">
+      {legacyNames.length > 0 && (
+        <section className="legacy-company-banner">
+          <div className="legacy-company-copy">
+            <span className="field-label">Left over from the old company ledger</span>
+            <p>
+              {legacyNames.length} categor{legacyNames.length === 1 ? 'y' : 'ies'} came from the
+              retired company finances: {legacyNames.join(', ')}. They will not come back again
+              either way.
+            </p>
+          </div>
+          <div className="legacy-company-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={store.keepLegacyCompanyCategories}
+            >
+              Keep them
+            </button>
+            <button
+              type="button"
+              className="btn-primary danger"
+              onClick={store.removeLegacyCompanyCategories}
+            >
+              Remove them
+            </button>
+          </div>
+        </section>
+      )}
       <header className="finance-command-head">
         <div>
           <p className="finance-command-kicker">Personal money</p>
