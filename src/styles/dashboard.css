@@ -389,6 +389,23 @@
   color: var(--text-dim);
 }
 
+.home-review-countdown {
+  margin: 0;
+  text-align: right;
+  max-width: 16rem;
+}
+
+.home-review-countdown strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+  line-height: var(--leading-snug);
+  font-variant-numeric: tabular-nums;
+}
+
 .home-review-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -444,6 +461,113 @@
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+}
+
+.home-review-focus em {
+  display: block;
+  margin-top: 0.55rem;
+  font-style: normal;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  font-weight: var(--weight-normal);
+}
+
+.home-review-visuals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.home-review-chart {
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.home-review-chart h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-snug);
+}
+
+.home-review-chart p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+.home-review-chart.is-wide {
+  grid-column: 1 / -1;
+}
+
+.home-lifestyle {
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--bg-panel);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.home-lifestyle-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.home-lifestyle-stats > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.home-lifestyle-stats span {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.home-lifestyle-stats strong {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+}
+
+.home-lifestyle-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.home-lifestyle-legend em {
+  margin-left: auto;
+  font-style: normal;
+  color: var(--text-dim);
+}
+
+.home-swatch {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+.home-swatch.is-food {
+  background: var(--accent);
+}
+
+.home-swatch.is-spend {
+  background: var(--brass);
 }
 
 /* --- Shell ---------------------------------------------------------------- */
@@ -521,7 +645,9 @@
   .home-metrics,
   .home-split,
   .home-actions,
-  .home-review-stats {
+  .home-review-stats,
+  .home-review-visuals,
+  .home-lifestyle-stats {
     grid-template-columns: 1fr;
   }
 

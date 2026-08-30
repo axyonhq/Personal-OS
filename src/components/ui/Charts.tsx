@@ -160,7 +160,7 @@ export function BarRow({
   bars,
   height = 72,
 }: {
-  bars: { label: string; value: number; target?: number; active?: boolean }[]
+  bars: { label: string; value: number; target?: number; active?: boolean; title?: string }[]
   height?: number
 }) {
   const max = Math.max(...bars.map((b) => Math.max(b.value, b.target || 0)), 1)
@@ -171,7 +171,11 @@ export function BarRow({
         const targetPct = bar.target ? (bar.target / max) * 100 : null
         const hit = bar.target != null && bar.value >= bar.target
         return (
-          <div key={bar.label} className={`ui-bar-col${bar.active ? ' is-active' : ''}`}>
+          <div
+            key={bar.label}
+            className={`ui-bar-col${bar.active ? ' is-active' : ''}`}
+            title={bar.title}
+          >
             <div className="ui-bar-track">
               {targetPct != null && (
                 <span className="ui-bar-target" style={{ bottom: `${Math.min(100, targetPct)}%` }} />
@@ -182,6 +186,109 @@ export function BarRow({
               />
             </div>
             <span className="ui-bar-label">{bar.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Two-series daily columns (food vs spendings, work vs pause, etc). */
+export function StackedTrend({
+  days,
+  height = 112,
+  aLabel = 'A',
+  bLabel = 'B',
+}: {
+  days: { a: number; b: number; label?: string; title?: string; active?: boolean }[]
+  height?: number
+  aLabel?: string
+  bLabel?: string
+}) {
+  const max = Math.max(...days.map((d) => d.a + d.b), 1)
+  return (
+    <div className="ui-trend" style={{ height }} role="img" aria-label={`${aLabel} and ${bLabel} by day`}>
+      {days.map((day, i) => {
+        const total = day.a + day.b
+        const aPct = total > 0 ? (day.a / max) * 100 : 0
+        const bPct = total > 0 ? (day.b / max) * 100 : 0
+        return (
+          <div
+            key={`${day.label ?? i}`}
+            className={`ui-trend-col${day.active ? ' is-active' : ''}`}
+            title={day.title}
+          >
+            <div className="ui-trend-track">
+              {day.b > 0 && (
+                <span
+                  className="ui-trend-seg ui-trend-b"
+                  style={{ height: `${bPct}%` }}
+                  aria-hidden="true"
+                />
+              )}
+              {day.a > 0 && (
+                <span
+                  className="ui-trend-seg ui-trend-a"
+                  style={{ height: `${aPct}%` }}
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            <span className="ui-trend-label">{day.label || '\u00a0'}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Horizontal mix of named parts (feelings, spend split). */
+export function MixBar({
+  parts,
+}: {
+  parts: { key: string; label: string; value: number; tone: 'accent' | 'brass' | 'warn' | 'danger' | 'muted' }[]
+}) {
+  const total = parts.reduce((sum, p) => sum + p.value, 0)
+  if (total <= 0) return null
+  return (
+    <div className="ui-mix" role="img" aria-label={parts.map((p) => `${p.label} ${p.value}`).join(', ')}>
+      {parts
+        .filter((p) => p.value > 0)
+        .map((p) => (
+          <span
+            key={p.key}
+            className={`ui-mix-seg ui-mix-${p.tone}`}
+            style={{ flexGrow: p.value }}
+            title={`${p.label}: ${p.value}`}
+          />
+        ))}
+    </div>
+  )
+}
+
+/** Compact 24-hour volume strip. Peak hour is marked. */
+export function ClockBars({
+  buckets,
+  height = 72,
+}: {
+  buckets: { hour: number; label: string; value: number; peak?: boolean }[]
+  height?: number
+}) {
+  const max = Math.max(...buckets.map((b) => b.value), 1)
+  return (
+    <div className="ui-clock" style={{ height }} role="img" aria-label="Hours of the day">
+      {buckets.map((b) => {
+        const pct = b.value > 0 ? Math.max(6, (b.value / max) * 100) : 0
+        return (
+          <div
+            key={b.hour}
+            className={`ui-clock-col${b.peak ? ' is-peak' : ''}${b.value > 0 ? ' is-on' : ''}`}
+            title={`${b.label}: ${b.value}`}
+          >
+            <div className="ui-clock-track">
+              <span className="ui-clock-fill" style={{ height: `${pct}%` }} />
+            </div>
+            {b.hour % 6 === 0 && <span className="ui-clock-label">{b.label}</span>}
           </div>
         )
       })}

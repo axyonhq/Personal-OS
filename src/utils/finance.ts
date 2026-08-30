@@ -340,7 +340,7 @@ export function parseAmount(raw: string): number | null {
   return Math.round(n * 100) / 100
 }
 
-function normalizeExpenseName(name: string): string {
+export function normalizeExpenseName(name: string): string {
   return name
     .trim()
     .toLowerCase()
@@ -368,6 +368,11 @@ function isFoodAndDrinkName(name: string): boolean {
     n === 'foods and drinks' ||
     n === 'food drink'
   )
+}
+
+/** True for Food, Drink, or the combined Food & Drink bucket. */
+export function isFoodOrDrinkCategoryName(name: string): boolean {
+  return isFoodName(name) || isDrinkName(name) || isFoodAndDrinkName(name)
 }
 
 /**

@@ -549,6 +549,8 @@ function migrateSundayReviews(raw: unknown): SundayReview[] {
     const journalSummary = typeof r.journalSummary === 'string' ? r.journalSummary : ''
     const synthesis = typeof r.synthesis === 'string' ? r.synthesis : ''
     const focus = typeof r.focus === 'string' ? r.focus : ''
+    const focusWhy = typeof r.focusWhy === 'string' ? r.focusWhy : ''
+    const version = Number.isFinite(Number(r.version)) ? Math.max(1, Math.round(Number(r.version))) : 1
     if (!synthesis && !focus && !spendSummary) continue
     out.push({
       id: typeof r.id === 'string' && r.id ? r.id : uid('sreview'),
@@ -567,6 +569,8 @@ function migrateSundayReviews(raw: unknown): SundayReview[] {
       journalSummary,
       synthesis,
       focus,
+      focusWhy,
+      version,
     })
   }
   return out

@@ -370,7 +370,7 @@ export interface VisionGoal {
 
 /**
  * Auto Sunday review. Built at Sunday 16:00 Bali from the last 7 days
- * to the minute. Shown on the home screen until Monday 16:00 Bali.
+ * to the minute. Shown on the home screen until the next Sunday 16:00 Bali.
  */
 export interface SundayReview {
   id: string
@@ -391,8 +391,12 @@ export interface SundayReview {
   workSummary: string
   journalSummary: string
   synthesis: string
-  /** One focus for the week ahead */
+  /** One concrete focus for the week ahead */
   focus: string
+  /** Why this focus, tied to this week's numbers */
+  focusWhy?: string
+  /** Writer schema version. Older rows get a sharper rewrite. */
+  version?: number
 }
 
 /** When each Autopilot ritual was completed — used to lock until the next period */
