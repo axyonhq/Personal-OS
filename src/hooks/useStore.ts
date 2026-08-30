@@ -69,6 +69,7 @@ import type {
   VisionGoal,
   WeeklyGoal,
   WeeklyGoalsArchiveEntry,
+  SundayReview,
 } from '../types'
 import {
   DEEP_WORK_IDS,
@@ -77,7 +78,6 @@ import {
   emptyMentorState,
   mentorChargeKey,
   normalizeActiveTab,
-  isDeepWorkId,
   scaleDeepWorkSplit,
   SESSION_FEELINGS,
   SESSION_TAGS,
@@ -105,7 +105,7 @@ import {
 } from '../utils/sessionAnalytics'
 import { revolutCredentialsChangedEvent } from '../utils/revolutApi'
 import { isInternalRevolutReviewItem } from '../lib/revolut/internal'
-import { isValidFocusNote, isValidSessionTarget } from '../utils/focusNote'
+import { isValidSessionTarget } from '../utils/focusNote'
 import { repairJournalEntryDate } from '../utils/journalDate'
 
 const STORAGE_KEY = 'batcave-deep-work-os-v2'
@@ -496,19 +496,82 @@ function normalizeTask(t: Task, today: string): Task {
   }
 }
 
-function migrateTasks(tasks: AppState['tasks']): AppState['tasks'] {
+function flattenPersonalTasks(tasks: AppState['tasks']): Task[] {
   const today = todayDateKey()
-  const next = { ...tasks } as AppState['tasks']
+  const merged: Task[] = []
+  const seen = new Set<string>()
   for (const project of PROJECTS) {
-    const list = Array.isArray(next[project.id]) ? next[project.id] : []
-    next[project.id] = list.map((t) => normalizeTask(t, today))
+    const list = Array.isArray(tasks[project.id]) ? tasks[project.id] : []
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object' || seen.has(raw.id)) continue
+      seen.add(raw.id)
+      merged.push(
+        normalizeTask(
+          {
+            ...raw,
+            plannedDate: null,
+            forToday: false,
+          },
+          today,
+        ),
+      )
+    }
   }
+  return merged
+}
 
-  // Personal = weekday-critical todos; Sunday Admin = Sunday-only admin pile.
-  if (!Array.isArray(next.personal)) next.personal = []
-  if (!Array.isArray(next.sundayAdmin)) next.sundayAdmin = []
+function migrateTasks(tasks: AppState['tasks']): AppState['tasks'] {
+  const personal = flattenPersonalTasks(tasks)
+  return {
+    chase: [],
+    myProject: [],
+    rav: [],
+    personal,
+    sundayAdmin: [],
+  }
+}
 
-  return next
+function migrateSundayReviews(raw: unknown): SundayReview[] {
+  if (!Array.isArray(raw)) return []
+  const out: SundayReview[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as Partial<SundayReview>
+    const sundayDate =
+      typeof r.sundayDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.sundayDate)
+        ? r.sundayDate
+        : ''
+    if (!sundayDate || seen.has(sundayDate)) continue
+    seen.add(sundayDate)
+    const spendSummary = typeof r.spendSummary === 'string' ? r.spendSummary : ''
+    const workSummary = typeof r.workSummary === 'string' ? r.workSummary : ''
+    const journalSummary = typeof r.journalSummary === 'string' ? r.journalSummary : ''
+    const synthesis = typeof r.synthesis === 'string' ? r.synthesis : ''
+    const focus = typeof r.focus === 'string' ? r.focus : ''
+    if (!synthesis && !focus && !spendSummary) continue
+    out.push({
+      id: typeof r.id === 'string' && r.id ? r.id : uid('sreview'),
+      sundayDate,
+      windowStart: typeof r.windowStart === 'string' ? r.windowStart : '',
+      windowEnd: typeof r.windowEnd === 'string' ? r.windowEnd : '',
+      generatedAt: typeof r.generatedAt === 'string' ? r.generatedAt : new Date().toISOString(),
+      spendTotal: Number.isFinite(Number(r.spendTotal)) ? Number(r.spendTotal) : 0,
+      budgetTotal: Number.isFinite(Number(r.budgetTotal)) ? Number(r.budgetTotal) : 0,
+      inBudget: Boolean(r.inBudget),
+      sessionCount: Math.max(0, Math.round(Number(r.sessionCount) || 0)),
+      sessionMinutes: Math.max(0, Math.round(Number(r.sessionMinutes) || 0)),
+      journalCount: Math.max(0, Math.round(Number(r.journalCount) || 0)),
+      spendSummary,
+      workSummary,
+      journalSummary,
+      synthesis,
+      focus,
+    })
+  }
+  return out
+    .sort((a, b) => b.sundayDate.localeCompare(a.sundayDate))
+    .slice(0, 12)
 }
 
 /** Active streak only if last tick was today or yesterday; otherwise broken → 0. */
@@ -886,6 +949,7 @@ function normalizeAppState(parsed: Partial<AppState>, options?: { recoverLocal?:
           })
           .filter((g): g is VisionGoal => g != null)
       : seed.visionGoals,
+    sundayReviews: migrateSundayReviews(parsed.sundayReviews),
     timeEntries: migrateTimeEntries(parsed.timeEntries, seed.timeEntries),
     activeTimer: migrateActiveTimer(parsed.activeTimer),
     mentor: migrateMentorState(parsed.mentor),
@@ -1756,15 +1820,11 @@ export function useStoreState() {
     options?: { startedMinutesAgo?: number; targetMinutes?: number },
   ) => {
     const cleaned = focusNote.trim().replace(/\s+/g, ' ')
-    // Deep work clocks never start without a Slight Edge Focus note.
-    if (isDeepWorkId(projectId) && !isValidFocusNote(cleaned)) return
     const rawTarget = options?.targetMinutes
     const targetMinutes =
       rawTarget != null && isValidSessionTarget(Math.round(rawTarget))
         ? Math.round(rawTarget)
         : undefined
-    // Deep work also needs a session target so progress can show live.
-    if (isDeepWorkId(projectId) && targetMinutes == null) return
     const now = Date.now()
     const agoMin = Math.max(0, Math.min(12 * 60, Math.round(options?.startedMinutesAgo ?? 0)))
     const startedAt = now - agoMin * 60_000
@@ -1876,14 +1936,12 @@ export function useStoreState() {
       options?: { targetMinutes?: number; endedAt?: number; date?: string },
     ) => {
       const cleaned = focusNote.trim().replace(/\s+/g, ' ')
-      if (isDeepWorkId(projectId) && !isValidFocusNote(cleaned)) return null
       const mins = Math.max(1, Math.min(12 * 60, Math.round(minutes)))
       const rawTarget = options?.targetMinutes
       const targetMinutes =
         rawTarget != null && isValidSessionTarget(Math.round(rawTarget))
           ? Math.round(rawTarget)
           : undefined
-      if (isDeepWorkId(projectId) && targetMinutes == null) return null
 
       let endedAt = options?.endedAt ?? Date.now()
       let startedAt = endedAt - mins * 60_000
@@ -2627,6 +2685,7 @@ export function useStoreState() {
         personalFinance: s.personalFinance,
         revolutSync: s.revolutSync,
         visionGoals: s.visionGoals,
+        sundayReviews: s.sundayReviews,
         autopilotCompletions: s.autopilotCompletions,
         lastSaturdayDumpSunday: s.lastSaturdayDumpSunday,
         migrations: s.migrations,
@@ -2742,6 +2801,16 @@ export function useStoreState() {
     [update],
   )
 
+  const saveSundayReview = useCallback((review: SundayReview) => {
+    update((s) => {
+      const rest = (s.sundayReviews ?? []).filter((r) => r.sundayDate !== review.sundayDate)
+      return {
+        ...s,
+        sundayReviews: [review, ...rest].slice(0, 12),
+      }
+    })
+  }, [update])
+
   const minutesFor = useCallback(
     (projectId: ProjectId | 'all', scope: 'day' | 'week' | 'total', date = state.selectedDate) => {
       let entries = state.timeEntries
@@ -2761,11 +2830,10 @@ export function useStoreState() {
     (date: string) => {
       void tick
       let total = state.timeEntries
-        .filter((e) => e.date === date && isDeepWorkId(e.projectId))
+        .filter((e) => e.date === date)
         .reduce((s, e) => s + e.minutes, 0)
       if (
         state.activeTimer &&
-        isDeepWorkId(state.activeTimer.projectId) &&
         todayDateKey(new Date(state.activeTimer.sessionStartedAt)) === date
       ) {
         total += Math.floor(activeTimerWorkMs(state.activeTimer) / 60000)
@@ -2788,13 +2856,10 @@ export function useStoreState() {
     const datesWithEntries = new Set<string>()
     for (const entry of state.timeEntries) {
       datesWithEntries.add(entry.date)
-      if (!isDeepWorkId(entry.projectId)) continue
       deepMinutesByDate.set(entry.date, (deepMinutesByDate.get(entry.date) || 0) + entry.minutes)
     }
 
-    // Count a running timer too, so the streak agrees with hitTarget instead of
-    // reading zero until the session is saved.
-    if (state.activeTimer && isDeepWorkId(state.activeTimer.projectId)) {
+    if (state.activeTimer) {
       const liveDate = todayDateKey(new Date(state.activeTimer.sessionStartedAt))
       const liveMinutes = Math.floor(activeTimerWorkMs(state.activeTimer) / 60000)
       if (liveMinutes > 0) {
@@ -3015,6 +3080,7 @@ export function useStoreState() {
     addVisionGoal,
     updateVisionGoal,
     removeVisionGoal,
+    saveSundayReview,
     minutesFor,
     resetToSeed,
     loadSampleData,

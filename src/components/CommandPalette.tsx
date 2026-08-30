@@ -5,21 +5,14 @@ import {
   CheckCircle2,
   CornerDownLeft,
   Download,
-  ListTodo,
   Play,
   Search,
   Upload,
-  Wallet,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { PROJECT_MAP, PROJECTS } from '../data/seed'
-import { useNavigateTab } from '../hooks/useNavigateTab'
 import type { Store } from '../hooks/useStore'
-import { DEEP_WORK_IDS, type AppTab, type DeepWorkId, type ProjectId } from '../types'
 import { triggerBackupDownload } from '../utils/backup'
-import { formatMoney } from '../utils/finance'
-import { NAV_ITEMS } from './nav'
 import { useToast } from './ui/Toast'
 
 type Command = {
@@ -29,17 +22,9 @@ type Command = {
   group: string
   icon: React.ReactNode
   run: () => void
-  /** Extra words matched against the query but not shown. */
   keywords?: string
 }
 
-/**
- * Command palette (Cmd/Ctrl+K).
- *
- * The app had no search and no keyboard route to anything: every action needed
- * a tab click, then a modal, then a form. This makes the whole surface
- * reachable in two keystrokes.
- */
 export function CommandPalette({
   store,
   open,
@@ -49,17 +34,15 @@ export function CommandPalette({
   store: Store
   open: boolean
   onOpenChange: (open: boolean) => void
-  onStartSession: (projectId: DeepWorkId | ProjectId) => void
+  onStartSession: () => void
 }) {
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const importRef = useRef<HTMLInputElement>(null)
-  const navigateTab = useNavigateTab()
   const { toast } = useToast()
 
-  // Global shortcut. Cmd+K on macOS, Ctrl+K elsewhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -87,107 +70,68 @@ export function CommandPalette({
   const close = useCallback(() => onOpenChange(false), [onOpenChange])
 
   const commands = useMemo<Command[]>(() => {
-    const list: Command[] = []
-
-    for (const item of NAV_ITEMS) {
-      const Icon = item.icon
-      list.push({
-        id: `go:${item.id}`,
-        label: item.label,
-        hint: item.sub,
-        group: 'Go to',
-        keywords: item.id,
-        icon: <Icon strokeWidth={1.75} />,
-        run: () => {
-          navigateTab(item.id as AppTab)
-          close()
-        },
-      })
-    }
-
-    for (const id of DEEP_WORK_IDS) {
-      const project = PROJECT_MAP[id]
-      list.push({
-        id: `timer:${id}`,
-        label: `Start timer — ${project.name}`,
-        group: 'Deep work',
+    const list: Command[] = [
+      {
+        id: 'timer:start',
+        label: 'Start deep work',
+        group: 'Session',
         keywords: 'focus session start timer',
         icon: <Play strokeWidth={1.75} />,
         run: () => {
-          onStartSession(id)
+          onStartSession()
           close()
         },
-      })
-    }
+      },
+    ]
 
-    // Open tasks, so a task can be found and completed without leaving the bar.
-    for (const project of PROJECTS) {
-      for (const task of store.state.tasks[project.id] || []) {
-        if (task.done || task.archived) continue
-        list.push({
-          id: `task:${task.id}`,
-          label: task.text,
-          hint: project.name,
-          group: 'Tasks',
-          keywords: `${project.name} task todo`,
-          icon: <CheckCircle2 strokeWidth={1.75} />,
-          run: () => {
-            store.toggleTask(project.id, task.id)
-            close()
-          },
-        })
-      }
-    }
-
-    for (const category of store.state.personalFinance.categories) {
-      if (category.parentId) continue
+    for (const task of store.state.tasks.personal || []) {
+      if (task.done || task.archived) continue
       list.push({
-        id: `money:${category.id}`,
-        label: `Log spend — ${category.name}`,
-        hint: formatMoney(category.amount),
-        group: 'Money',
-        keywords: 'spend expense budget money log',
-        icon: <Wallet strokeWidth={1.75} />,
+        id: `task:${task.id}`,
+        label: task.text,
+        hint: 'Mark done',
+        group: 'Tasks',
+        keywords: 'task todo',
+        icon: <CheckCircle2 strokeWidth={1.75} />,
         run: () => {
-          navigateTab('personalFinances')
+          store.toggleTask('personal', task.id)
           close()
         },
       })
     }
 
-    list.push({
-      id: 'backup:export',
-      label: 'Export backup',
-      hint: 'JSON file, no bank secrets',
-      group: 'Data',
-      keywords: 'download backup export json',
-      icon: <Download strokeWidth={1.75} />,
-      run: () => {
-        triggerBackupDownload(store.exportBackup())
-        close()
+    list.push(
+      {
+        id: 'backup:export',
+        label: 'Export backup',
+        hint: 'JSON file, no bank secrets',
+        group: 'Data',
+        keywords: 'download backup export json',
+        icon: <Download strokeWidth={1.75} />,
+        run: () => {
+          triggerBackupDownload(store.exportBackup())
+          close()
+        },
       },
-    })
-    list.push({
-      id: 'backup:import',
-      label: 'Import backup',
-      hint: 'Replace this browser’s copy',
-      group: 'Data',
-      keywords: 'upload restore import json',
-      icon: <Upload strokeWidth={1.75} />,
-      run: () => {
-        importRef.current?.click()
+      {
+        id: 'backup:import',
+        label: 'Import backup',
+        hint: 'Replace this browser’s copy',
+        group: 'Data',
+        keywords: 'upload restore import json',
+        icon: <Upload strokeWidth={1.75} />,
+        run: () => {
+          importRef.current?.click()
+        },
       },
-    })
+    )
 
     return list
-  }, [store, close, onStartSession, navigateTab])
+  }, [store, close, onStartSession])
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) {
-      // Default view stays short and useful rather than dumping everything.
-      return commands.filter((c) => c.group === 'Go to' || c.group === 'Deep work')
-    }
+    if (!q) return commands.filter((c) => c.group === 'Session' || c.group === 'Tasks').slice(0, 12)
     const terms = q.split(/\s+/)
     return commands
       .filter((c) => {
@@ -201,7 +145,6 @@ export function CommandPalette({
     setCursor(0)
   }, [query])
 
-  // Keep the highlighted row in view while arrowing through a long list.
   useEffect(() => {
     const node = listRef.current?.querySelector<HTMLElement>(`[data-index="${cursor}"]`)
     node?.scrollIntoView({ block: 'nearest' })
@@ -255,7 +198,7 @@ export function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search tasks, jump to a view, start a timer…"
+            placeholder="Start a session, complete a task…"
             aria-label="Search commands"
             autoComplete="off"
             spellCheck={false}
@@ -265,9 +208,7 @@ export function CommandPalette({
 
         <div className="ui-palette-list" ref={listRef} role="listbox" aria-label="Results">
           {results.length === 0 && (
-            <p className="ui-palette-empty">
-              Nothing matches “{query}”. Try a task name, a view, or “timer”.
-            </p>
+            <p className="ui-palette-empty">Nothing matches “{query}”.</p>
           )}
           {grouped.map((section) => (
             <div key={section.group} className="ui-palette-group">
@@ -302,9 +243,7 @@ export function CommandPalette({
         </div>
 
         <footer className="ui-palette-foot">
-          <span>
-            <ListTodo aria-hidden="true" strokeWidth={1.75} /> Selecting a task marks it done
-          </span>
+          <span>Selecting a task marks it done</span>
           <span className="ui-palette-keys">
             <kbd>↑</kbd>
             <kbd>↓</kbd> move <kbd>↵</kbd> run

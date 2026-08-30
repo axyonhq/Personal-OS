@@ -74,7 +74,7 @@ export function SessionDebriefModal({
         {projectName} · {minutesLabel} active
       </p>
       <p className="session-debrief-copy">
-        Honest read — this feeds the Mentor. Patterns only show up if you log the truth.
+        Honest read. Patterns only show up if you log the truth.
       </p>
 
       <div className="session-debrief-feelings" role="radiogroup" aria-label="Session feeling">
