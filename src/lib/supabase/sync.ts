@@ -3,6 +3,7 @@ import type {
   AppState,
   FinanceLedger,
   RevolutCredentials,
+  SundayReview,
   TimeEntry,
 } from '@/types'
 import {
@@ -31,6 +32,22 @@ export function mergeTimeEntries(a: TimeEntry[] = [], b: TimeEntry[] = []): Time
     if (nextScore > prevScore) map.set(entry.id, entry)
   }
   return Array.from(map.values())
+}
+
+function mergeSundayReviews(a: SundayReview[] = [], b: SundayReview[] = []): SundayReview[] {
+  const map = new Map<string, SundayReview>()
+  for (const review of [...a, ...b]) {
+    if (!review?.sundayDate) continue
+    const prev = map.get(review.sundayDate)
+    if (!prev) {
+      map.set(review.sundayDate, review)
+      continue
+    }
+    const prevAt = Date.parse(prev.generatedAt || '') || 0
+    const nextAt = Date.parse(review.generatedAt || '') || 0
+    if (nextAt >= prevAt) map.set(review.sundayDate, review)
+  }
+  return Array.from(map.values()).sort((x, y) => y.sundayDate.localeCompare(x.sundayDate)).slice(0, 12)
 }
 
 /**
@@ -209,6 +226,7 @@ export function mergeSessionSafeState(
         ? other.activeTimer ?? null
         : pickActiveTimer(base.activeTimer, other.activeTimer),
     personalFinance,
+    sundayReviews: mergeSundayReviews(base.sundayReviews, other.sundayReviews),
   }
 }
 
@@ -271,6 +289,7 @@ export function stateRichnessScore(state: Partial<AppState> | null | undefined):
     (state.mentor?.journalEntries?.length || 0) * 4 +
     (state.mentor?.messages?.length || 0) +
     (state.mentor?.latestInsight ? 6 : 0) +
+    (state.sundayReviews?.length || 0) * 3 +
     (state.timeEntries?.filter((e) => e.debrief).length || 0) * 3 +
     Object.keys(state.bodyLogs || {}).length * 2
   )

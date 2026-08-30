@@ -23,8 +23,8 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Command Center — Personal OS',
-  description: 'Personal command center OS',
+  title: 'Personal OS',
+  description: 'Vision, money, tasks, and deep work — one home screen',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: '/favicon.svg',

@@ -368,6 +368,33 @@ export interface VisionGoal {
   updatedAt: string
 }
 
+/**
+ * Auto Sunday review. Built at Sunday 16:00 Bali from the last 7 days
+ * to the minute. Shown on the home screen until Monday 16:00 Bali.
+ */
+export interface SundayReview {
+  id: string
+  /** Bali YYYY-MM-DD of the Sunday this review belongs to */
+  sundayDate: string
+  /** ISO instant of Sunday 16:00 Bali minus 7 days */
+  windowStart: string
+  /** ISO instant of Sunday 16:00 Bali */
+  windowEnd: string
+  generatedAt: string
+  spendTotal: number
+  budgetTotal: number
+  inBudget: boolean
+  sessionCount: number
+  sessionMinutes: number
+  journalCount: number
+  spendSummary: string
+  workSummary: string
+  journalSummary: string
+  synthesis: string
+  /** One focus for the week ahead */
+  focus: string
+}
+
 /** When each Autopilot ritual was completed — used to lock until the next period */
 export interface AutopilotCompletions {
   /** YYYY-MM-DD evening wind down completed */
@@ -562,6 +589,8 @@ export interface AppState {
   revolutCredentials?: RevolutCredentials
   /** Long-term inspiring goals */
   visionGoals: VisionGoal[]
+  /** Sunday reviews keyed by generation week */
+  sundayReviews: SundayReview[]
   /** AI mentor — chat, journal OCR text, pattern insights */
   mentor: MentorState
   /** One-time migrations already applied — stops them re-running every load. */

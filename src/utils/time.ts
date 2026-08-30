@@ -97,6 +97,26 @@ export function upcomingSunday(key: string = todayDateKey()): string {
   return addDays(key, 7 - dow)
 }
 
+/** Calendar Sunday on or before this date key. */
+export function sundayOnOrBefore(key: string): string {
+  const dow = parseDateKey(key).getDay()
+  return addDays(key, -dow)
+}
+
+/**
+ * Bali wall-clock → UTC Date.
+ * Asia/Makassar (WITA) is UTC+8 all year, no daylight saving.
+ */
+export function baliDateTimeToUtc(
+  dateKey: string,
+  hour: number,
+  minute = 0,
+  second = 0,
+): Date {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, hour - 8, minute, second))
+}
+
 export function weekDays(selectedDate: string): string[] {
   const start = startOfWeekMonday(selectedDate)
   return Array.from({ length: 7 }, (_, i) => addDays(start, i))

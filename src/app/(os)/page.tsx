@@ -10,8 +10,8 @@ const DashboardView = dynamic(
   { ssr: false, loading: () => <PageSkeleton /> },
 )
 
-export default function TodayPage() {
+export default function HomePage() {
   const store = useStore()
   const { startSession } = useSessionActions()
-  return <DashboardView store={store} onStartProject={startSession} />
+  return <DashboardView store={store} onStartSession={startSession} />
 }
