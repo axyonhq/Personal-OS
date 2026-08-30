@@ -5,6 +5,7 @@ import { useState } from 'react'
 import type { Store } from '../hooks/useStore'
 import { todayDateKey } from '../utils/time'
 import { HomeFinances } from './home/HomeFinances'
+import { HomeLifestyleSpend } from './home/HomeLifestyleSpend'
 import { HomeMetrics } from './home/HomeMetrics'
 import { HomeSundayReview } from './home/HomeSundayReview'
 import { HomeTasks } from './home/HomeTasks'
@@ -27,6 +28,7 @@ export function DashboardView({
     <div className="home">
       <HomeVision store={store} />
       <HomeSundayReview store={store} />
+      <HomeLifestyleSpend store={store} />
       <HomeMetrics store={store} />
 
       <div className="home-actions">

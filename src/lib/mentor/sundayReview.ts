@@ -15,6 +15,7 @@ export type SundayReviewProse = {
   journalSummary: string
   synthesis: string
   focus: string
+  focusWhy: string
 }
 
 const SUNDAY_REVIEW_SCHEMA = {
@@ -22,28 +23,43 @@ const SUNDAY_REVIEW_SCHEMA = {
   properties: {
     spendSummary: {
       type: 'string' as const,
-      description: '2-4 sentences on spend vs budget and the habit behind it. Plain words. Honest.',
+      description:
+        '3-5 sentences on food, drink, and day-to-day spend vs budget. Name the actual days and amounts. Ignore rent, motorbike, and monthly bills unless they are the only numbers. Plain words. Honest.',
     },
     workSummary: {
       type: 'string' as const,
-      description: '2-4 sentences on deep work hours, session count, and quality if debriefs exist.',
+      description:
+        '3-5 sentences on deep work. Name session count, total time, the heaviest day, the most productive hour, and how it felt if debriefs exist. Be specific.',
     },
     journalSummary: {
       type: 'string' as const,
       description:
-        '3-6 sentences that make sense of the journal pages. Themes, mood, tension, what the writing is asking for. If there is no journal, say that clearly.',
+        '4-7 sentences that make sense of the journal pages. Quote a short phrase. Name the tension and what the writing is asking for this week. If there is no journal, say that clearly.',
     },
     synthesis: {
       type: 'string' as const,
       description:
-        'One short paragraph that ties money, work, and journal into a useful read. Point them in the right direction. No fluff.',
+        'Two short paragraphs, 5-8 sentences total. Tie money, work, and journal into one specific read. Cite real numbers and a real phrase. Name the pattern, not a vibe. No pep talk. No generic “endurance” or “overthinking” unless those exact words are in the journal.',
     },
     focus: {
       type: 'string' as const,
-      description: 'Exactly one focus for the next 7 days. Concrete. One sentence.',
+      description:
+        'Exactly one action for the next 7 days. Must include WHEN (day + time or first session), WHAT (a named task, project, or rule from the dossier), and DONE LOOKS LIKE. One or two sentences. Forbidden: “act fast”, “be more”, “try to”, “focus on”, “stop overthinking”, “commit to”, “simple focused action”. Pull the action from their open tasks, one-thing, journal, or peak work hour.',
+    },
+    focusWhy: {
+      type: 'string' as const,
+      description:
+        '1-2 sentences. Why this exact action, with numbers or a journal phrase from the dossier. No pep talk.',
     },
   },
-  required: ['spendSummary', 'workSummary', 'journalSummary', 'synthesis', 'focus'] as const,
+  required: [
+    'spendSummary',
+    'workSummary',
+    'journalSummary',
+    'synthesis',
+    'focus',
+    'focusWhy',
+  ] as const,
   additionalProperties: false as const,
 }
 
@@ -72,13 +88,15 @@ function proseFromRecord(parsed: Record<string, unknown>): SundayReviewProse | n
   const journalSummary = asText(parsed.journalSummary)
   const synthesis = asText(parsed.synthesis)
   const focus = asText(parsed.focus)
+  const focusWhy = asText(parsed.focusWhy)
   if (!synthesis && !focus) return null
   return {
     spendSummary: spendSummary || 'Spend for this week is in the numbers above.',
     workSummary: workSummary || 'Work hours are in the numbers above.',
     journalSummary: journalSummary || 'No journal read this week.',
     synthesis: synthesis || [spendSummary, workSummary, journalSummary].filter(Boolean).join(' '),
-    focus: focus || 'Pick one thing and finish it.',
+    focus: focus || 'Pick the top open task. Tomorrow, work it in one 90-minute block before noon.',
+    focusWhy: focusWhy || 'A named task and a named block beats a vague week.',
   }
 }
 
@@ -110,8 +128,9 @@ function proseFromCompletion(response: OpenAI.Chat.Completions.ChatCompletion): 
       spendSummary: '',
       workSummary: '',
       journalSummary: '',
-      synthesis: text.slice(0, 1600),
-      focus: 'Protect the next deep work block.',
+      synthesis: text.slice(0, 2200),
+      focus: 'Pick the top open task. Tomorrow, work it in one 90-minute block before noon.',
+      focusWhy: 'A named task and a named block beats a vague week.',
     }
   }
   return null
@@ -139,7 +158,7 @@ export async function runSundayReview(
     const response = await client.chat.completions.create(
       {
         model: MENTOR_OPENAI_MODEL,
-        max_completion_tokens: 1800,
+        max_completion_tokens: 2800,
         tools: [TOOL],
         tool_choice: {
           type: 'function',
@@ -149,7 +168,7 @@ export async function runSundayReview(
           {
             role: 'system',
             content:
-              'You write a weekly Sunday review for one person. Be direct, kind, and useful. Short words. No jargon. Cite real numbers from the dossier. Give exactly one focus for the week ahead. If journal text exists, make sense of it — do not paste it back raw.',
+              'You write a weekly Sunday review for one person. Be direct, kind, and specific enough to act on without thinking. Short words. No jargon. Cite real numbers, real hours, and real task names from the dossier. The focus must be a concrete move they can do this week — a time, a named piece of work, and a finish line. If journal text exists, make sense of it — do not paste it back raw. Never write a vague slogan.',
           },
           {
             role: 'user',

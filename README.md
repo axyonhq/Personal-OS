@@ -19,7 +19,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - **Tasks** — one personal list
 - **Journal** — upload page photos
 - **Deep work** — start a session with one tap, then log how it felt
-- **Sunday review** — auto at 4pm Bali every Sunday, on screen for 24 hours
+- **Sunday review** — auto at 4pm Bali every Sunday, on screen until the next one, with a live countdown
 
 ## Stack
 
