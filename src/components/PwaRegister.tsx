@@ -3,17 +3,36 @@
 import { useEffect } from 'react'
 
 /**
- * Registers the service worker so the app still opens with no network.
+ * Registers the service worker so hashed static files still load offline.
  *
- * Network-first: a new deploy is used when available, the cached copy is only
- * a fallback. API calls are never cached.
+ * `updateViaCache: 'none'` so browsers actually fetch a new `/sw.js` after
+ * deploy. If an older worker was already in control, reload once when the new
+ * one takes over — that is how stuck login tabs recover.
  */
 export function PwaRegister() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
-    void navigator.serviceWorker.register('/sw.js').catch(() => {
-      // Registration failing should never break the app.
-    })
+
+    const hadController = Boolean(navigator.serviceWorker.controller)
+
+    const onControllerChange = () => {
+      if (!hadController) return
+      window.location.reload()
+    }
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange)
+
+    void navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        void reg.update()
+      })
+      .catch(() => {
+        // Registration failing should never break the app.
+      })
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
+    }
   }, [])
   return null
 }
