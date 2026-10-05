@@ -371,6 +371,111 @@
   width: 100%;
 }
 
+.home-todos {
+  gap: var(--space-5);
+}
+
+.home-todo-tables {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.home-todo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  overflow-x: auto;
+}
+
+.home-todo-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.home-todo-panel-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.home-todo-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.home-todo-table th:first-child,
+.home-todo-table td:first-child,
+.home-todo-table th:last-child,
+.home-todo-table td:last-child {
+  width: 2.25rem;
+}
+
+.home-todo-table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 0 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.home-todo-table td {
+  padding: 0.55rem 0.35rem;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+
+.home-todo-table tr:last-child td {
+  border-bottom: none;
+}
+
+.home-todo-text {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.home-todo-project {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.home-todo-due {
+  width: 9.5rem;
+}
+
+.home-todo-due .platform-select {
+  min-width: 8.5rem;
+}
+
+.home-todo-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.home-task-add-personal {
+  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 0.7fr) auto;
+}
+
+.home-task-add-business {
+  grid-template-columns: minmax(0, 1.2fr) minmax(7rem, 0.7fr) minmax(8.5rem, 0.8fr) auto;
+}
+
 /* --- Sunday review -------------------------------------------------------- */
 
 .home-review {
@@ -644,6 +749,9 @@
   .home-vision,
   .home-metrics,
   .home-split,
+  .home-todo-tables,
+  .home-task-add-personal,
+  .home-task-add-business,
   .home-actions,
   .home-review-stats,
   .home-review-visuals,
