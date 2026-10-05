@@ -51,10 +51,8 @@ export function DashboardView({
         </Button>
       </div>
 
-      <div className="home-split">
-        <HomeFinances store={store} />
-        <HomeTasks store={store} />
-      </div>
+      <HomeFinances store={store} />
+      <HomeTasks store={store} />
 
       <Modal open={journalOpen} onClose={() => setJournalOpen(false)} title="Journal" size="lg">
         <JournalCapture store={store} defaultDate={todayDateKey()} heading="Photos of pages" />
