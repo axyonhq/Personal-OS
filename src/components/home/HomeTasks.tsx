@@ -111,7 +111,6 @@ function TaskTable({
           <tr>
             <th scope="col" aria-label="Done" />
             <th scope="col">Task</th>
-            {showProject && <th scope="col">Project</th>}
             <th scope="col">Due</th>
             <th scope="col" aria-label="Delete" />
           </tr>
@@ -119,13 +118,12 @@ function TaskTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td className="home-todo-empty" colSpan={showProject ? 5 : 4}>
+              <td className="home-todo-empty" colSpan={4}>
                 {todayOnly ? 'Nothing due today.' : 'Nothing open. Add the next thing.'}
               </td>
             </tr>
           ) : (
             rows.map(({ task, projectId: id }) => {
-              const project = PROJECTS.find((item) => item.id === id)
               const currentDue = dueValue(task, today)
               return (
                 <tr key={task.id}>
@@ -138,12 +136,6 @@ function TaskTable({
                     />
                   </td>
                   <td className="home-todo-text">{task.text}</td>
-                  {showProject && (
-                    <td className="home-todo-project">
-                      <span className="dot" style={{ background: project?.color }} />
-                      {project?.name}
-                    </td>
-                  )}
                   <td className="home-todo-due">
                     <Select
                       value={currentDue}
