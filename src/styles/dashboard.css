@@ -446,15 +446,6 @@
   overflow-wrap: anywhere;
 }
 
-.home-todo-project {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
 .home-todo-due {
   width: 9.5rem;
 }
